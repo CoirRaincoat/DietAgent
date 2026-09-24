@@ -1,0 +1,47 @@
+name: dietagent-demo
+
+services:
+  backend:
+    image: dietagent:demo
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEEPSEEK_API_KEY
+      - DEEPSEEK_BASE_URL
+      - DEEPSEEK_MODEL
+      - LLM_TIMEOUT_SECONDS
+      - SESSION_DB=/app/runtime/sessions.sqlite3
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app.api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+    expose:
+      - "8000"
+    volumes:
+      - dietagent_runtime:/app/runtime
+    restart: unless-stopped
+
+  frontend:
+    image: dietagent-frontend:demo
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  dietagent_runtime:
+    external: true
+    name: dietagent_demo_runtime

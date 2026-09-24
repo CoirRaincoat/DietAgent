@@ -1,0 +1,132 @@
+version: "mvp-1"
+scope: "基于菜谱文字的过敏与明确禁忌筛查；健康目标仅为定性排序，不计算营养摄入或治疗效果。"
+sources:
+  who_healthy_diet:
+    title: "WHO Healthy diet"
+    url: "https://www.who.int/news-room/fact-sheets/detail/healthy-diet"
+    checked_on: "2026-09-24"
+    use: "多样食物、蛋白质来源、蔬菜及减少游离糖/钠的一般原则；不把人群阈值当个体目标。"
+  fda_allergens:
+    title: "FDA Food Allergies"
+    url: "https://www.fda.gov/food/nutrition-food-labeling-and-critical-foods/food-allergies"
+    checked_on: "2026-09-24"
+    use: "常见过敏原分类依据；中文词表为本项目保守工程映射，不代表完整医学或产品标签审核。"
+  niams_gout:
+    title: "NIAMS Gout: Diagnosis, Treatment, and Steps to Take"
+    url: "https://www.niams.nih.gov/health-topics/gout/diagnosis-treatment-and-steps-to-take"
+    checked_on: "2026-09-24"
+    use: "将内脏、部分海鲜、酒及含糖饮料作为降尿酸偏好的排序提示，不诊断、不保证尿酸下降。"
+
+# Exact aliases are shared by retrieval, exclusions and strict inventory matching.
+aliases:
+  番茄: [西红柿]
+  土豆: [马铃薯, 洋芋]
+  西兰花: [西蓝花, 绿花菜]
+  花菜: [花椰菜, 菜花]
+  鸡蛋: [鸡子, 全蛋, 全蛋液, 蛋液, 蛋清, 蛋白, 蛋黄]
+  牛奶: [鲜奶, 纯牛奶, 全脂奶, 脱脂奶]
+  豆腐: [老豆腐, 北豆腐, 南豆腐, 嫩豆腐, 水豆腐]
+  花生: [落花生, 花生米, 花生仁]
+  虾: [虾仁, 鲜虾, 河虾, 海虾, 对虾, 基围虾, 白虾]
+  猪肉: [肉末, 猪肉末, 猪肉馅, 瘦肉, 猪瘦肉, 里脊肉, 猪里脊]
+  鸡肉: [鸡胸肉, 鸡腿肉, 鸡脯肉]
+  葱: [小葱, 香葱, 大葱, 葱花, 葱段, 葱白, 青葱]
+  姜: [生姜, 姜片, 姜丝, 姜末]
+  蒜: [大蒜, 蒜瓣, 蒜末, 蒜蓉]
+  米饭: [熟米饭, 白米饭]
+  大米: [粳米, 籼米]
+  白糖: [白砂糖, 砂糖, 绵白糖]
+  盐: [食盐, 精盐, 细盐]
+  酱油: [生抽, 老抽, 味极鲜]
+  芝麻油: [香油, 麻油]
+  清水: [水, 饮用水, 开水, 温水, 凉水]
+  柠檬: [柠檬汁]
+
+allergens:
+  fish:
+    inputs: [鱼, 鱼类, 鱼肉, fish, finfish]
+    terms: [鱼, 鲫, 鲤, 鲈, 鳕, 鳝, 鳗, 鳟, 鲑, 鲷, 鲳, 鳓, 鲅, 沙丁, 银鳕, 鱼露, 木鱼花, 柴鱼片, 东星斑, 石斑, 多宝, 龙利, 巴沙, 鲢, 鳙, 鲶, 鲻, 鲭, 鲐, 鲱, 鲽, 鲆, 鲮, 鲣, 鲔, 鲥, 鲚, 鲟, 鳜]
+    ignore_phrases: [鱼香, 鱼眼泡, 鱼腥草, 鲍鱼, 鱿鱼, 墨鱼, 章鱼]
+  shellfish:
+    inputs: [虾, 虾仁, 鲜虾, 蟹, 螃蟹, 虾蟹, 甲壳类, 甲壳动物, crustacean, crustaceans, shrimp, crab]
+    terms: [虾, 蟹, 蟹棒, 蟹柳, 虾皮, 虾米, 海米, 虾酱, 虾粉, 蟹黄]
+  molluscs:
+    inputs: [贝类, 贝, 软体动物, mollusc, molluscs, shellfish]
+    terms: [贝, 蛤, 蚝, 蛎, 蚬, 螺, 蛏, 蚶, 鲍鱼, 鱿鱼, 墨鱼, 章鱼, 干瑶柱, 瑶柱, 干贝, 花甲, 青口]
+    ignore_phrases: [螺丝椒, 海螺面]
+  peanut:
+    inputs: [花生, 花生米, 花生仁, 落花生, peanut, peanuts]
+    terms: [花生, 落花生, 花生酱, 花生油]
+  nuts:
+    inputs: [坚果, 树坚果, nut, nuts, tree nuts, 核桃, 杏仁, 腰果, 榛子, 松子, 开心果, 碧根果, 夏威夷果]
+    terms: [核桃, 杏仁, 腰果, 榛子, 松子, 开心果, 碧根果, 夏威夷果, 巴旦木, 榧子, 坚果, 松仁, 胡桃, 南杏, 北杏]
+  soy:
+    inputs: [大豆, 黄豆, 豆类, 豆制品, 豆, soybean, soy, soya]
+    terms: [大豆, 黄豆, 毛豆, 豆腐, 豆干, 豆皮, 豆浆, 豆乳, 腐竹, 百叶, 千张, 豆芽, 豆酱, 豆瓣酱, 豆豉, 酱油, 生抽, 老抽, 味极鲜, 豆油, 豆花, 素鸡, 素鸭, 香干, 腐乳, 豆奶, 豆渣, 豆蛋白]
+  dairy:
+    inputs: [奶, 牛奶, 乳, 乳制品, 奶制品, milk, dairy, 乳蛋白]
+    terms: [牛奶, 牛乳, 鲜奶, 奶粉, 酸奶, 酸乳, 奶酪, 乳酪, 芝士, 黄油, 奶油, 炼乳, 炼奶, 乳清, 酪蛋白, 乳粉]
+    ignore_phrases: [椰奶, 杏仁奶, 燕麦奶, 豆奶]
+  egg:
+    inputs: [蛋, 鸡蛋, 蛋类, 鸡蛋白, 蛋清, 蛋白, 蛋黄, egg, eggs]
+    terms: [鸡蛋, 鸭蛋, 鹌鹑蛋, 鹅蛋, 蛋液, 蛋白, 蛋清, 蛋黄, 蛋粉, 皮蛋, 松花蛋, 咸蛋, 荷包蛋]
+    ignore_phrases: [蛋白质, 蛋白酶, 植物蛋白]
+  wheat:
+    inputs: [小麦, 麦, 面粉, 麸质, gluten, wheat]
+    terms: [小麦, 面粉, 面条, 面包, 馒头, 面筋, 饺子皮, 馄饨皮, 酱油, 生抽, 老抽, 麦芽, 挂面, 手擀面, 意大利面, 意面, 乌冬, 通心粉, 饼干, 蛋糕, 馄饨, 水饺, 饺子, 包子, 面糊, 低筋, 高筋, 中筋]
+  sesame:
+    inputs: [芝麻, sesame]
+    terms: [芝麻, 香油, 麻油, 麻酱]
+
+# Seafood is intentionally broader than crustaceans. A vague shellfish request
+# conservatively covers both crustaceans and molluscs.
+allergen_groups:
+  海鲜: [fish, shellfish, molluscs]
+  海产品: [fish, shellfish, molluscs]
+  seafood: [fish, shellfish, molluscs]
+  shellfish: [shellfish, molluscs]
+  贝类海鲜: [shellfish, molluscs]
+  虾蟹贝类: [shellfish, molluscs]
+  花生及坚果: [peanut, nuts]
+  坚果: [peanut, nuts]
+  豆类: [soy, "specific:豌豆", "specific:蚕豆", "specific:绿豆", "specific:红豆", "specific:鹰嘴豆"]
+  豆: [soy, "specific:豌豆", "specific:蚕豆", "specific:绿豆", "specific:红豆", "specific:鹰嘴豆"]
+  蛋奶: [egg, dairy]
+
+specific_allergens: [啤酒, 芒果, 菠萝, 凤梨, 草莓, 桃, 水蜜桃, 猕猴桃, 奇异果, 香蕉, 苹果, 柑橘, 橙, 柠檬, 芹菜, 香菇, 蘑菇, 木耳, 香菜, 牛肉, 羊肉, 猪肉, 鸡肉, 玉米, 大米, 燕麦, 荞麦, 豌豆, 蚕豆, 绿豆, 红豆, 鹰嘴豆]
+uncertain_composites: [调味料, 调料包, 酱料包, 火锅底料, 咖喱块, 浓汤宝, 复合调味料, 沙拉酱, 沙茶酱, 蛋白粉, 不详, 未知]
+spicy_terms: [辣椒, 辣油, 辣酱, 小米椒, 朝天椒, 剁椒, 泡椒, 干红椒, 红油, 豆瓣酱, 哈瓦那椒, 辣粉, 青尖椒, 尖椒, 杭椒, 美人椒, 二荆条, 泡红椒, 线椒]
+known_foods: [白菜, 青菜, 菠菜, 生菜, 油麦菜, 娃娃菜, 包菜, 苦瓜, 丝瓜, 冬瓜, 南瓜, 黄瓜, 茄子, 胡萝卜, 白萝卜, 萝卜, 西葫芦, 芦笋, 莲藕, 山药, 芋头, 秋葵, 菜心, 西芹, 芹菜, 韭菜, 韭黄, 洋葱, 香菜, 香菇, 蘑菇, 金针菇, 杏鲍菇, 木耳, 银耳, 海带, 紫菜, 玉米, 豌豆, 蚕豆, 绿豆, 红豆, 黑豆, 红薯, 糯米, 小米, 燕麦, 糙米, 藜麦, 意面, 面条, 面粉, 淀粉, 玉米淀粉, 土豆淀粉, 红枣, 枸杞, 莲子, 百合, 桂圆, 牛肉, 羊肉, 排骨, 五花肉, 肉馅, 鸡翅, 鸡腿, 鸡, 鸭, 鸭肉, 火腿, 培根, 腊肉, 香肠, 鱼, 鲈鱼, 鲫鱼, 草鱼, 鳕鱼, 三文鱼, 黄鱼, 带鱼, 蟹, 蚝油, 料酒, 米酒, 啤酒, 白酒, 黄酒, 醋, 米醋, 陈醋, 香醋, 米醋, 胡椒, 胡椒粉, 黑胡椒, 白胡椒, 花椒, 八角, 桂皮, 孜然, 香叶, 罗勒, 迷迭香, 薄荷, 冰糖, 红糖, 蜂蜜, 糖浆, 橄榄油, 菜籽油, 玉米油, 葵花籽油, 食用油, 植物油, 油, 番茄酱, 甜面酱, 腐乳, 鸡精, 味精, 高汤, 清汤, 肉汤, 鸡汤, 牛肉汤, 蘑菇汤]
+
+# Numeric weights are engineering preferences, not evidence-based clinical doses.
+# Labels such as 降糖/降压/抗癌 in raw data never constitute evidence.
+health_goals:
+  控糖:
+    sources: [who_healthy_diet]
+    prefer_categories: [vegetable]
+    prefer_terms: [糙米, 燕麦, 藜麦, 全麦]
+    discourage_terms: [白糖, 白砂糖, 砂糖, 冰糖, 红糖, 蜂蜜, 糖浆, 炼乳, 炼奶]
+    note: "控糖偏好仅结合食材种类排序；缺少份量和成分数据，不能判断低糖或个人血糖反应。"
+  增肌:
+    sources: [who_healthy_diet]
+    prefer_categories: [protein]
+    prefer_terms: [鸡蛋, 鸡肉, 鸡胸肉, 豆腐, 牛奶, 鱼]
+    discourage_terms: []
+    note: "增肌偏好优先提供蛋白质来源；未计算蛋白质克数或增肌效果。"
+  减脂:
+    sources: [who_healthy_diet]
+    prefer_categories: [vegetable]
+    prefer_methods: [蒸, 煮, 炖, 焯]
+    discourage_methods: [炸, 油炸, 油煎]
+    discourage_terms: [白糖, 砂糖, 冰糖, 糖浆, 猪油, 黄油, 奶油]
+    note: "减脂偏好结合食材和做法排序；热量及份量未知，不承诺减重或低热量。"
+  降尿酸:
+    sources: [niams_gout]
+    prefer_categories: [vegetable]
+    discourage_terms: [猪肝, 鸡肝, 鸭肝, 鹅肝, 牛肝, 肝脏, 猪腰, 猪肾, 牛肾, 猪心, 猪肚, 沙丁鱼, 凤尾鱼, 虾, 蟹, 啤酒, 白酒, 黄酒, 糖浆]
+    note: "降尿酸偏好降低部分内脏、海鲜和酒类配方的排序；没有嘌呤数值，不保证降低尿酸。"
+  降压:
+    sources: [who_healthy_diet]
+    prefer_categories: [vegetable]
+    discourage_terms: [酱油, 生抽, 老抽, 蚝油, 豆瓣酱, 豆豉, 咸菜, 腌菜, 腊肉, 火腿, 培根, 香肠]
+    note: "降压偏好关注含盐调味品来源；用量未知，不能判定低钠或治疗效果。"

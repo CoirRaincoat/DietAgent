@@ -1,0 +1,42 @@
+.env
+.env.*
+!.env.example
+!.env.*.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+logs/
+runtime/
+artifacts/
+*.egg-info/
+build/
+dist/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+~$*
+
+# Frontend dependencies and generated browser artifacts
+node_modules/
+frontend/dist/
+playwright-report/
+test-results/
+
+# Private inputs and source material must stay out of public snapshots.
+# These patterns do not remove files already tracked in the private working repository.
+/dataset/user_profile/
+/dataset/evaluation/
+/evaluation/dialogues.json
+/tests/test_data.py
+/tests/test_real_data.py
+/tests/test_offline_replay.py
+/docs/problem.docx
+/docs/references/
+/prompt/

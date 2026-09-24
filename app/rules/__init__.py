@@ -1,0 +1,1 @@
+"""Deterministic dietary constraint rules."""
