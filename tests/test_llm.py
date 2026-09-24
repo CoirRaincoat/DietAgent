@@ -91,7 +91,6 @@ async def test_parse_contract_and_minimal_profile(profile, state):
     {"action": "plan", "allergies": [""]},
     {"action": "plan", "allergies": "虾"},
     {"action": "plan", "meal_type": "午夜大餐"},
-    {"action": "plan", "dish_count": 1, "soup_count": 2},
     {"action": "plan", "replace_slot": 1},
     {"action": "plan", "no_spicy": False},
     {"action": "clarify"},
@@ -105,6 +104,46 @@ async def test_reject_invalid_or_unsafe_intents(content, profile, state):
         with pytest.raises(LLMOutputError) as caught:
             await adapter.parse("安排一下", state, profile)
         assert caught.value.code == "invalid_output"
+
+
+async def test_parse_retries_once_after_invalid_output(profile, state):
+    responses = [completion("not json"), completion({"action": "plan", "dish_count": 3})]
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=responses.pop(0))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = DeepSeekLLM("fake-test-secret", client=client)
+        result = await adapter.parse("安排三道菜", state, profile)
+    assert result.dish_count == 3
+    assert len(requests) == 2
+    retry_payload = json.loads(requests[1].content)
+    assert retry_payload["messages"][1]["content"].find('"repair_attempt": 1') >= 0
+
+
+async def test_parse_stops_after_one_repair_attempt(profile, state):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=completion("not json"))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = DeepSeekLLM("fake-test-secret", client=client)
+        with pytest.raises(LLMOutputError):
+            await adapter.parse("安排一下", state, profile)
+    assert len(requests) == 2
+
+
+async def test_count_conflict_reaches_deterministic_service_validation(profile, state):
+    adapter, client = adapter_for(completion({
+        "action": "plan", "dish_count": 1, "soup_count": 2,
+    }))
+    async with client:
+        result = await adapter.parse("总共一道菜，其中两道汤", state, profile)
+    assert (result.dish_count, result.soup_count) == (1, 2)
 
 
 @pytest.mark.parametrize("finish_reason", ["length", "content_filter", "tool_calls", None])

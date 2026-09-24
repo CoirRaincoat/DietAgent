@@ -94,6 +94,11 @@ def test_full_menu_tool_calls_and_replacement_preserves_other_slots(tmp_path, ca
         old, new = [x["recipe_id"] for x in first["menu"]], [x["recipe_id"] for x in second["menu"]]
         assert old[0] == new[0] and old[2] == new[2] and old[1] != new[1]
         assert second["conversation_state"]["revision"] == 2
+        assert "recipe_id" not in first["reason"] + second["reason"]
+        assert first["reason"].count("营养信息仅基于") == 1
+        assert second["reason"].count("营养信息仅基于") == 1
+        assert second["menu"][1]["name"] in second["reason"]
+        assert "局部" in second["reason"] or "只调整" in second["reason"]
 
 
 def test_added_restrictions_survive_multiple_rounds_and_restart(tmp_path, catalog):
@@ -182,10 +187,11 @@ def test_explanation_failure_uses_verified_facts(tmp_path, catalog):
         result = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
         assert result["status"] == "ok"
         assert result["explanation_source"] == "verified_template"
-        assert "未计算" in result["reason"]
+        assert "recipe_id" not in result["reason"]
+        assert result["reason"].count("营养信息仅基于") == 1
 
 
-@pytest.mark.parametrize("error,status", [(LLMUnavailable("timeout"), 503), (LLMOutputError(), 502),
+@pytest.mark.parametrize("error,status", [(LLMUnavailable("timeout"), 503),
                                           (LLMUnavailable("original_profile_blocked"), 403)])
 def test_parser_failure_returns_safe_error_and_no_fake_success(tmp_path, catalog, error, status):
     llm = ScriptedLLM()
@@ -195,6 +201,90 @@ def test_parser_failure_returns_safe_error_and_no_fake_success(tmp_path, catalog
         assert response.status_code == status
         assert "menu" not in response.json()
         assert client.get("/health").status_code == 200
+
+
+def test_invalid_parser_output_returns_clarification_instead_of_502(tmp_path, catalog):
+    llm = ScriptedLLM()
+    llm.parse_error = LLMOutputError()
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post(
+            "/chat", json={"user_id": 3, "message": "1人晚餐，没有任何忌口"}
+        )
+        result = response.json()
+    assert response.status_code == 200
+    assert result["status"] == "clarification_required"
+    assert result["menu"] == []
+    assert result["clarification_questions"][0]["field"] == "request"
+    assert "重新安排整套菜单" in result["clarification_questions"][0]["options"]
+
+
+def test_invalid_parser_output_preserves_existing_menu_and_constraints(tmp_path, catalog):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post(
+            "/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}
+        ).json()
+        llm.parse_error = LLMOutputError()
+        second = client.post("/chat", json={
+            "user_id": 3,
+            "message": "换成我说的那个",
+            "session_id": first["conversation_state"]["session_id"],
+        }).json()
+    assert second["status"] == "clarification_required"
+    assert [item["recipe_id"] for item in second["menu"]] == [
+        item["recipe_id"] for item in first["menu"]
+    ]
+    assert second["conversation_state"]["constraints"] == first["conversation_state"]["constraints"]
+    assert second["conversation_state"]["menu_valid"] is True
+
+
+def test_conflicting_counts_preserve_previous_menu_and_ask_one_question(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(),
+        Intent(action="plan", dish_count=2, soup_count=3),
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post(
+            "/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}
+        ).json()
+        second = client.post("/chat", json={
+            "user_id": 3,
+            "message": "改成两道菜，其中三道汤",
+            "session_id": first["conversation_state"]["session_id"],
+        }).json()
+    assert second["status"] == "clarification_required"
+    assert len(second["clarification_questions"]) == 1
+    assert [item["recipe_id"] for item in second["menu"]] == [
+        item["recipe_id"] for item in first["menu"]
+    ]
+    constraints = second["conversation_state"]["constraints"]
+    assert (constraints["dish_count"], constraints["soup_count"]) == (3, 0)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["没有忌口", "没有任何忌口", "没有别的忌口", "其他都能吃", "按档案忌口就行"],
+)
+def test_common_no_additional_restriction_phrases_confirm_context(tmp_path, catalog, message):
+    llm = ScriptedLLM([Intent(people=1, meal_type="晚餐")])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post("/chat", json={"user_id": 3, "message": message}).json()
+    assert result["status"] == "ok"
+    assert result["conversation_state"]["confirmed_fields"] == [
+        "people", "meal_type", "restrictions"
+    ]
+
+
+def test_restriction_phrase_never_removes_profile_allergies(tmp_path, catalog):
+    catalog.profiles[3].allergies = ["鸡蛋"]
+    llm = ScriptedLLM([Intent(people=1, meal_type="晚餐")])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat", json={"user_id": 3, "message": "按档案忌口就行"}
+        ).json()
+    assert result["status"] == "ok"
+    assert result["conversation_state"]["constraints"]["allergies"] == ["鸡蛋"]
+    assert all("鸡蛋" not in item["ingredients"] for item in result["menu"])
 
 def test_first_request_retry_without_session_does_not_create_another_session(tmp_path, catalog):
     llm = ScriptedLLM()
@@ -235,6 +325,8 @@ def test_explanation_never_calls_replanning_tools(tmp_path, catalog):
         assert second["status"] == "ok"
         assert [x["recipe_id"] for x in first["menu"]] == [x["recipe_id"] for x in second["menu"]]
         assert "menu_modify" not in [x["name"] for x in second["tool_calls"]]
+        assert "搭配依据" in second["reason"] or "已核验信息" in second["reason"]
+        assert "烹饪方式" in second["reason"]
 
 
 def test_proactive_clarification_collects_only_missing_context(tmp_path, catalog):

@@ -12,6 +12,7 @@ from app.agent.clarification import (
     missing_questions,
 )
 from app.agent.planner import MenuPlanner, PlanResult
+from app.agent.response_copy import render_reason, verified_facts
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
 from app.domain.models import (
     ChatResult,
@@ -99,9 +100,39 @@ class MealAgent:
             else:
                 expected_revision = state.revision
             started = perf_counter()
-            intent = await self.llm.parse(message, state, profile)
+            try:
+                intent = await self.llm.parse(message, state, profile)
+            except LLMOutputError:
+                parsed = perf_counter()
+                return self._complete_preserved_clarification(
+                    state=state,
+                    expected_revision=expected_revision,
+                    message=message,
+                    reason=(
+                        "我没有完全理解这次调整。请确认你是要增加忌口、"
+                        "替换某道菜，还是重新安排整套菜单？"
+                    ),
+                    options=["增加忌口", "替换某道菜", "重新安排整套菜单"],
+                    started=started,
+                    parsed=parsed,
+                    request_id=request_id,
+                    request_hash=request_hash,
+                )
             parsed = perf_counter()
             previous_ids = list(state.menu_ids)
+            conflict = self._intent_conflict(state, intent)
+            if conflict:
+                return self._complete_preserved_clarification(
+                    state=state,
+                    expected_revision=expected_revision,
+                    message=message,
+                    reason=conflict,
+                    options=["调整总菜数", "调整汤的数量"],
+                    started=started,
+                    parsed=parsed,
+                    request_id=request_id,
+                    request_hash=request_hash,
+                )
             if intent.action == "reject":
                 # Save explicit rejection before clarification/planning can fail.
                 state.rejected_recipe_ids = _merge(state.rejected_recipe_ids, previous_ids)
@@ -127,6 +158,79 @@ class MealAgent:
             )[-12:]
             self.store.complete(result, state.revision, request_id, request_hash)
             return result
+
+    @staticmethod
+    def _intent_conflict(state: SessionState, intent: Intent) -> str | None:
+        """Detect count conflicts before applying any part of the new intent."""
+        dish_count = intent.dish_count or state.constraints.dish_count
+        soup_count = (
+            intent.soup_count if intent.soup_count is not None else state.constraints.soup_count
+        )
+        if soup_count > dish_count:
+            return (
+                f"你要求总共 {dish_count} 道菜、其中 {soup_count} 道汤，但汤数不能超过总菜数。"
+                "请确认要调整总菜数，还是减少汤的数量？"
+            )
+        return None
+
+    def _complete_preserved_clarification(
+        self,
+        state: SessionState,
+        expected_revision: int | None,
+        message: str,
+        reason: str,
+        options: list[str],
+        started: float,
+        parsed: float,
+        request_id: str | None,
+        request_hash: str,
+    ) -> ChatResult:
+        """Record a clarification turn while preserving confirmed constraints and menu."""
+        state.revision += 1
+        state.last_message = message
+        state.pending_clarification = reason
+        state.pending_fields = ["request"]
+        state.history = (state.history + [{"role": "user", "content": message}])[-12:]
+        events: list[ToolEvent] = []
+        menu = []
+        nutrition = None
+        if state.menu_valid:
+            recipes = [
+                self.catalog.recipes[recipe_id]
+                for recipe_id in state.menu_ids
+                if recipe_id in self.catalog.recipes
+            ]
+            if len(recipes) == len(state.menu_ids):
+                menu = [
+                    self._item(recipe, slot, state.constraints, events)
+                    for slot, recipe in enumerate(recipes, start=1)
+                ]
+                nutrition = self.tools.call(
+                    "nutrition_analysis", events, recipes=recipes, constraints=state.constraints
+                )
+        result = ChatResult(
+            status="clarification_required",
+            menu=menu,
+            reason=reason,
+            constraints=self._constraints_text(state.constraints, state.confirmed_fields),
+            conversation_state=state,
+            warnings=["已保留上一版有效菜单和已确认条件，本轮尚未应用。"] if menu else [],
+            tool_calls=events,
+            clarification_questions=[
+                ClarificationQuestion(field="request", prompt=reason, options=options)
+            ],
+            nutrition_analysis=nutrition,
+            timings_ms={
+                "parse": round((parsed - started) * 1000, 2),
+                "total": round((perf_counter() - started) * 1000, 2),
+            },
+        )
+        state.history = (
+            state.history + [{"role": "assistant", "content": result.reason}]
+        )[-12:]
+        self.store.save(state, expected_revision)
+        self.store.complete(result, state.revision, request_id, request_hash)
+        return result
 
     def _apply_intent(self, state: SessionState, intent: Intent, message: str) -> str | None:
         constraints = state.constraints
@@ -200,8 +304,6 @@ class MealAgent:
         unresolved = self.rules.unresolved_allergies(constraints)
         if unresolved:
             return "当前词典无法确认这些过敏原，请明确具体食材：" + "、".join(unresolved)
-        if constraints.soup_count > constraints.dish_count:
-            return "汤的数量不能超过总菜数，请明确总共几道，其中几道汤。"
         if intent.action == "clarify" or intent.clarification:
             return intent.clarification or "请补充本餐需要调整的具体要求。"
         questions = missing_questions(state)
@@ -378,23 +480,10 @@ class MealAgent:
         state.menu_valid = True
         state.pending_clarification = None
         state.pending_fields = []
-        facts = {
-            "catalog": "本餐菜品均来自方太菜谱库，可通过 recipe_id 查到具体食材与步骤。",
-            "constraints": "已按当前已知过敏、排除食材与明确要求执行规则检查。",
-            "nutrition": "营养说明基于食材和做法作定性分析，未计算热量、蛋白质、糖或钠的精确含量。",
-        }
-        if previous_ids:
-            kept = sum(old == new for old, new in zip(previous_ids, chosen_ids))
-            facts["changes"] = (
-                f"与上一版相比，保留原位置上的 {kept} 道菜，其余按本轮要求重新选择。"
-            )
-        for item in menu:
-            if item.nutrition_notes:
-                facts[f"dish_{item.slot}"] = f"{item.name}：{item.nutrition_notes[0]}"
+        facts = verified_facts(menu)
         warnings = list(planning.warnings)
         for recipe in chosen:
             warnings.extend(self.health_tool.evaluate(recipe, constraints).warnings)
-        warnings.append("缺少份数与完整营养数据，尚不支持逐人定量摄入或健康效果判断。")
         if constraints.people > 1:
             warnings.append("当前按共享菜单聚合已提供的限制；其他用餐者未提供的健康信息仍未知。")
         planning_finished = perf_counter()
@@ -403,12 +492,18 @@ class MealAgent:
             selected = await self.llm.explain(facts)
             if not selected or any(key not in facts for key in selected):
                 raise ValueError("Unknown explanation fact")
-            selected = list(dict.fromkeys(["catalog", "constraints"] + selected + ["nutrition"]))
-            reason = "\n".join(facts[key] for key in selected)
         except (LLMUnavailable, LLMOutputError, ValueError):
             source = "verified_template"
-            reason = "\n".join(facts.values())
+            selected = list(facts)
             warnings.append("模型解释暂不可用，已使用同一份验证事实生成说明。")
+        reason = render_reason(
+            intent=intent,
+            menu=menu,
+            previous_ids=previous_ids,
+            changes=planning.changes,
+            selected_fact_ids=selected,
+            revision=state.revision,
+        )
         return ChatResult(
             status="ok", menu=menu, reason=reason,
             constraints=self._constraints_text(constraints, state.confirmed_fields), conversation_state=state,

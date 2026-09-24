@@ -12,10 +12,10 @@ def restriction_acknowledged(message: str, state: SessionState) -> bool:
     """A generic 'whatever' never confirms the absence of dietary restrictions."""
     affirmative = (
         r"(?:我|我们|大家)?(?:本餐|这餐|目前|现在|暂时)?(?:"
-        r"(?:没有|无|没什么|没有其他|无其他|没有额外|无额外)(?:的)?忌口"
+        r"(?:没有|无)(?:任何|其他|别的|额外)?(?:的)?忌口|没什么忌口"
         r"|(?:没有|无)(?:任何|其他)?(?:食物|食材)?过敏"
         r"|(?:按照|按|沿用|保留)(?:已有|原有|我的|用户)?(?:档案|画像)(?:中|里)?(?:的)?(?:忌口|限制)?"
-        r"|(?:没有|无)(?:其他|额外)限制|(?:什么)?都能吃)(?:了)?"
+        r"|(?:没有|无)(?:其他|额外)限制|(?:什么|其他)?都能吃)(?:了|就行|即可|就好)?"
     )
     if any(re.fullmatch(affirmative, clause.strip()) for clause in re.split(r"[，,。；;\n]", message)):
         return True
@@ -35,7 +35,7 @@ def confirm_from_intent(state: SessionState, intent: Intent, message: str) -> No
         confirmed.add("meal_type")
     if (
         intent.allergies or intent.excluded_ingredients or intent.no_spicy is True
-        or (intent.restrictions_confirmed and restriction_acknowledged(message, state))
+        or restriction_acknowledged(message, state)
     ):
         confirmed.add("restrictions")
     state.confirmed_fields = [name for name in REQUIRED_FIELDS if name in confirmed]

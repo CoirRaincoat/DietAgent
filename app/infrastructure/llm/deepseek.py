@@ -138,7 +138,28 @@ class DeepSeekLLM(BaseLLM):
         prompt = self._intent_prompt + "\nIntent json schema:\n" + json.dumps(
             Intent.model_json_schema(), ensure_ascii=False
         )
-        result = await self._json_completion(prompt, payload)
+        repair_prompt = (
+            prompt
+            + "\nThe previous response did not satisfy the schema or safety checks. "
+            "Return one complete JSON object only. Preserve explicit user constraints and do not "
+            "invent fields."
+        )
+        for attempt in range(2):
+            try:
+                result = await self._json_completion(
+                    prompt if attempt == 0 else repair_prompt,
+                    payload if attempt == 0 else {**payload, "repair_attempt": 1},
+                )
+                return self._intent_from_result(result, message, state)
+            except LLMOutputError:
+                if attempt == 1:
+                    raise
+        raise LLMOutputError()
+
+    def _intent_from_result(
+        self, result: dict[str, Any], message: str, state: SessionState
+    ) -> Intent:
+        """Validate one provider result without mutating conversation state."""
         try:
             if "action" not in result:
                 raise ValueError("Missing action")
@@ -185,12 +206,6 @@ class DeepSeekLLM(BaseLLM):
             raise ValueError("Conflicting time constraints")
         if intent.meal_type is not None and intent.meal_type not in _MEAL_TYPES:
             raise ValueError("Unknown meal type")
-        if (
-            intent.soup_count is not None
-            and intent.dish_count is not None
-            and intent.soup_count > intent.dish_count
-        ):
-            raise ValueError("Soup count exceeds menu size")
         if intent.action == "clarify":
             if not intent.clarification or not intent.clarification.strip():
                 raise ValueError("Missing clarification")
