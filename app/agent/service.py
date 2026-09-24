@@ -102,6 +102,9 @@ class MealAgent:
             intent = await self.llm.parse(message, state, profile)
             parsed = perf_counter()
             previous_ids = list(state.menu_ids)
+            if intent.action == "reject":
+                # Save explicit rejection before clarification/planning can fail.
+                state.rejected_recipe_ids = _merge(state.rejected_recipe_ids, previous_ids)
             issue = self._apply_intent(state, intent, message)
             state.revision += 1
             state.last_message = message
@@ -276,6 +279,17 @@ class MealAgent:
     ) -> ChatResult:
         started = perf_counter()
         constraints = state.constraints
+        rejected_ids = set(state.rejected_recipe_ids)
+        rejected_names = {
+            compact(self.catalog.recipes[key].name)
+            for key in rejected_ids if key in self.catalog.recipes
+        }
+        # Multiple catalog rows may represent the same named dish. Do not
+        # reintroduce a rejected dish through another recipe ID or a suggestion.
+        rejected_ids.update(
+            recipe.recipe_id for recipe in self.catalog.recipes.values()
+            if compact(recipe.name) in rejected_names
+        )
         if constraints.max_minutes is not None:
             return self._unresolved(
                 state,
@@ -308,6 +322,7 @@ class MealAgent:
                 len(current) != constraints.dish_count
                 or sum("soup" in recipe.categories for recipe in current) != constraints.soup_count
                 or len(verified_current) != len(current)
+                or any(recipe.recipe_id in rejected_ids for recipe in current)
             ):
                 return self._unresolved(
                     state, "当前没有满足已知约束的完整菜单，请先规划本餐。",
@@ -323,10 +338,11 @@ class MealAgent:
             safe = self.tools.call(
                 "health_check", events, recipes=candidates, constraints=constraints
             )
+            safe = [recipe for recipe in safe if recipe.recipe_id not in rejected_ids]
             planning = self.tools.call(
                 "menu_modify", events, candidates=safe, constraints=constraints, current=current,
                 replace_slot=replace_slot,
-                reject_ids=set(previous_ids) if intent.action == "reject" else None,
+                reject_ids=rejected_ids,
             )
         if planning.failure:
             return self._unresolved(state, planning.failure, "no_feasible_menu", events)
@@ -335,6 +351,7 @@ class MealAgent:
             len(chosen) != constraints.dish_count
             or len({recipe.recipe_id for recipe in chosen}) != len(chosen)
             or sum("soup" in recipe.categories for recipe in chosen) != constraints.soup_count
+            or any(recipe.recipe_id in rejected_ids for recipe in chosen)
         ):
             raise RuntimeError("Final menu structure validation failed")
         menu = [self._item(recipe, i + 1, constraints, events) for i, recipe in enumerate(chosen)]

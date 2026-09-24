@@ -42,6 +42,29 @@ aliases:
   清水: [水, 饮用水, 开水, 温水, 凉水]
   柠檬: [柠檬汁]
 
+# Directional culinary membership for hard constraints and preference evidence.
+# These are NOT inventory aliases, nutrient claims, or medical cross-reactivity.
+# Specific source words take precedence over ambiguous meat-product names.
+# A generic meat product is withheld only for a related meat restriction; its
+# unknown contents must never count as a positive preference match.
+food_families:
+  猪肉:
+    members: [猪肉, 猪五花肉, 五花肉, 猪前腿肉, 猪后腿肉, 猪腿肉, 猪小排, 猪大排, 猪仔排, 猪肋排, 猪肋条肉, 猪排, 排骨, 肋排, 仔排, 猪里脊, 猪瘦肉, 猪廋肉, 猪肥肉, 猪肥膘, 猪梅花肉, 猪展肉, 猪眉子肉, 猪腱子肉, 猪颈肉, 猪蹄, 猪脚, 猪手, 猪肘, 猪肚, 猪肝, 猪心, 猪腰, 猪肾, 猪肺, 猪耳, 猪舌, 猪血, 猪皮, 猪大肠, 猪小肠, 猪骨, 猪棒骨, 猪筒骨, 猪脊骨, 猪脆骨, 猪油]
+    ignore_phrases: [牛排骨, 羊排骨, 牛肋排, 羊肋排, 素排骨, 排骨酱]
+    uncertain_members: [肉末, 肉馅, 肉糜, 瘦肉, 里脊肉, 火腿, 香肠, 腊肠, 肉松, 肉丸, 培根, 腊肉, 排骨酱]
+    uncertainty_ignore_phrases: [牛肉末, 鸡肉末, 羊肉末, 鱼肉末, 牛肉馅, 鸡肉馅, 羊肉馅, 鱼肉馅, 牛肉糜, 鸡肉糜, 羊肉糜, 瘦牛肉, 瘦羊肉, 牛里脊肉, 鸡里脊肉, 牛肉丸, 鸡肉丸, 鱼肉丸, 素肉丸, 牛肉松, 鸡肉松, 鱼肉松, 素肉松, 植物肉松, 植物肉末, 植物肉馅]
+  鸡肉:
+    members: [鸡肉, 鸡胸, 鸡脯, 鸡腿, 鸡全腿, 鸡琵琶腿, 鸡翅, 鸡中翅, 鸡全翅, 鸡爪, 凤爪, 鸡脚, 鸡块, 整鸡, 全鸡, 三黄鸡, 乌鸡, 仔鸡, 童子鸡, 老母鸡, 母鸡, 公鸡, 土鸡, 草鸡, 春鸡, 嫩鸡, 文昌鸡, 鸡肝, 鸡心, 鸡胗, 鸡骨, 鸡软骨, 鸡脆骨, 鸡皮, 鸡油, 鸡血, 鸡汤, 鸡高汤]
+    exact_names: [鸡]
+    ignore_phrases: [鸡腿菇, 鸡枞, 鸡头米, 素鸡, 植物鸡肉, 火鸡腿, 火鸡胸, 火鸡肉]
+    uncertain_members: [肉末, 肉馅, 肉糜, 火腿, 香肠, 腊肠, 肉松, 肉丸, 鸡精, 鸡粉, 鸡汁]
+    uncertainty_ignore_phrases: [猪肉末, 牛肉末, 羊肉末, 鱼肉末, 猪肉馅, 牛肉馅, 羊肉馅, 鱼肉馅, 猪肉糜, 牛肉糜, 羊肉糜, 猪肉丸, 牛肉丸, 鱼肉丸, 素肉丸, 猪肉松, 牛肉松, 鱼肉松, 素肉松, 植物肉松, 植物肉末, 植物肉馅]
+  牛肉:
+    members: [牛肉, 牛腩, 牛腱, 牛排, 牛小排, 牛仔骨, 牛肋条, 牛肋排, 牛里脊, 牛肩肉, 牛腹肉, 牛腿肉, 肥牛, 牛尾, 牛肚, 牛百叶, 牛蹄筋, 牛蹄, 牛骨, 牛肝, 牛心, 牛舌]
+    ignore_phrases: [牛肝菌, 植物牛肉]
+    uncertain_members: [肉末, 肉馅, 肉糜, 瘦肉, 里脊肉, 火腿, 香肠, 腊肠, 肉松, 肉丸, 牛油]
+    uncertainty_ignore_phrases: [猪肉末, 鸡肉末, 羊肉末, 鱼肉末, 猪肉馅, 鸡肉馅, 羊肉馅, 鱼肉馅, 猪肉糜, 鸡肉糜, 羊肉糜, 猪瘦肉, 瘦猪肉, 瘦羊肉, 猪里脊肉, 鸡里脊肉, 猪肉丸, 鸡肉丸, 鱼肉丸, 素肉丸, 猪肉松, 鸡肉松, 鱼肉松, 素肉松, 植物肉松, 植物肉末, 植物肉馅, 牛油果]
+
 allergens:
   fish:
     inputs: [鱼, 鱼类, 鱼肉, fish, finfish]
@@ -73,7 +96,7 @@ allergens:
     ignore_phrases: [蛋白质, 蛋白酶, 植物蛋白]
   wheat:
     inputs: [小麦, 麦, 面粉, 麸质, gluten, wheat]
-    terms: [小麦, 面粉, 面条, 面包, 馒头, 面筋, 饺子皮, 馄饨皮, 酱油, 生抽, 老抽, 麦芽, 挂面, 手擀面, 意大利面, 意面, 乌冬, 通心粉, 饼干, 蛋糕, 馄饨, 水饺, 饺子, 包子, 面糊, 低筋, 高筋, 中筋]
+    terms: [小麦, 面粉, 面条, 面包, 馒头, 面筋, 饺子皮, 馄饨皮, 酱油, 生抽, 老抽, 麦芽, 挂面, 手擀面, 意大利面, 意面, 乌冬, 通心粉, 饼干, 蛋糕, 馄饨, 水饺, 饺子, 包子, 面糊, 低筋, 高筋, 中筋, 吐司, 土司, 法棍, 全麦粉, 意粉, 面包糠, 面包屑]
   sesame:
     inputs: [芝麻, sesame]
     terms: [芝麻, 香油, 麻油, 麻酱]
