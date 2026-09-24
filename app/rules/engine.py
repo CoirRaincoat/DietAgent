@@ -41,6 +41,10 @@ class RuleEngine:
         path = Path(config_path) if config_path is not None else DEFAULT_RULES_PATH
         self.config: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
         self.aliases: dict[str, list[str]] = self.config["aliases"]
+        # Culinary membership is directional: chicken wings belong to chicken,
+        # but are not interchangeable with chicken breast in strict inventory.
+        # Optional for compatibility with existing rule configurations.
+        self.food_families: dict[str, dict[str, Any]] = self.config.get("food_families", {})
         self._canonical = {
             compact(alias): canonical
             for canonical, aliases in self.aliases.items()
@@ -88,13 +92,41 @@ class RuleEngine:
 
     def _allergen_matches(self, text: str, key: str) -> list[str]:
         if key.startswith("specific:"):
-            terms = self.aliases_for(key.split(":", 1)[1])
+            food = key.split(":", 1)[1]
+            family = self.food_families.get(food)
+            if family is not None:
+                return self._family_matches(text, family)
+            terms = self.aliases_for(food)
         else:
             rule = self.config["allergens"][key]
             terms = rule["terms"]
             for ignored in rule.get("ignore_phrases", []):
                 text = text.replace(ignored, "")
         return [term for term in terms if contains_term(text, term)]
+
+    @staticmethod
+    def _family_matches(text: str, family: dict[str, Any]) -> list[str]:
+        for ignored in family.get("ignore_phrases", []):
+            text = text.replace(ignored, " ")
+        matches = [term for term in family.get("members", []) if contains_term(text, term)]
+        # Each parsed ingredient occupies its own line in _food_text. This lets
+        # the ingredient 鸡 match without interpreting 鸡精 or 鸡腿菇 as chicken.
+        names = {compact(line) for line in text.splitlines()}
+        matches.extend(term for term in family.get("exact_names", []) if compact(term) in names)
+        return matches
+
+    def _uncertain_family_matches(self, text: str, value: str) -> list[str]:
+        matches: set[str] = set()
+        for key in self._allergen_keys(value):
+            if not key.startswith("specific:"):
+                continue
+            family = self.food_families.get(key.split(":", 1)[1], {})
+            remaining = text
+            for ignored in family.get("uncertainty_ignore_phrases", []):
+                remaining = remaining.replace(ignored, " ")
+            matches.update(term for term in family.get("uncertain_members", [])
+                           if contains_term(remaining, term))
+        return sorted(matches)
 
     def food_matches(self, recipe: Recipe, value: str) -> list[str]:
         """Match actual food text using aliases or a recognized food group."""
@@ -140,6 +172,11 @@ class RuleEngine:
                               for term in self._allergen_matches(text, key)})
             if matched:
                 reasons.append(f"过敏限制「{allergy}」命中配料或步骤：{'、'.join(matched)}。")
+            uncertain = self._uncertain_family_matches(text, allergy)
+            if uncertain:
+                reasons.append(
+                    f"复合配料来源不明，无法核对过敏限制「{allergy}」：{'、'.join(uncertain)}。"
+                )
         if constraints.allergies:
             uncertain = [term for term in self.config["uncertain_composites"]
                          if contains_term(text, term)]
@@ -150,6 +187,11 @@ class RuleEngine:
             matches = self.food_matches(recipe, excluded)
             if matches:
                 reasons.append(f"明确排除「{excluded}」命中配料或步骤：{'、'.join(matches)}。")
+            uncertain = self._uncertain_family_matches(text, excluded)
+            if uncertain:
+                reasons.append(
+                    f"复合配料来源不明，无法核对排除食材「{excluded}」：{'、'.join(uncertain)}。"
+                )
         if constraints.no_spicy:
             matches = [term for term in self.config["spicy_terms"] if contains_term(text, term)]
             if matches:

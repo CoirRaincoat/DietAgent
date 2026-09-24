@@ -115,6 +115,9 @@ class SessionState(DomainModel):
     revision: int = 0
     constraints: Constraints = Field(default_factory=Constraints)
     menu_ids: list[str] = Field(default_factory=list)
+    # Explicitly rejected dishes remain excluded for this single-meal session.
+    # Ordinary local replacement does not create a lasting food restriction.
+    rejected_recipe_ids: list[str] = Field(default_factory=list)
     menu_valid: bool = False
     pending_allergy: bool = False
     pending_allergy_terms: list[str] = Field(default_factory=list)

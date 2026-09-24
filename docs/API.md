@@ -78,7 +78,7 @@ Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试
 | menu | 菜品与卡片数组，不能规划时为空 |
 | reason | 程序核验事实组成的解释，模型仅选择事实 ID |
 | constraints | 已确认约束及尚待确认信息的中文说明 |
-| conversation_state | 会话 ID、版本、确认字段、约束、菜单有效性及有限历史 |
+| conversation_state | 会话 ID、版本、确认字段、约束、菜单有效性、rejected_recipe_ids 及有限历史 |
 | clarification_questions | field、prompt、options，可直接用于前端提问 |
 | nutrition_analysis | 整餐定性组成、目标匹配、食材贡献与风险；无菜单时 null |
 | replacement_suggestions | 适用于指定槽位的库内候选，不自动应用 |
@@ -104,6 +104,12 @@ menu 和 replacement_suggestions 中每项包含：
 | replacement_reason | 建议项的替换理由，普通菜单项为 null |
 
 替换建议针对 slot 指明的位置，当前生成第 1 道菜的最多 2 个同类候选，不保证其他菜品都有建议。避免与当前菜单同名；建议经过相同限制检查。当前自然语言“只换第二道菜”支持定点换菜，尚不支持直接提交某个建议 ID 强制选菜。
+
+### 拒绝记忆与食材偏好
+
+`conversation_state.rejected_recipe_ids` 是本餐已明确整份否定的菜品ID列表，默认 `[]`；旧会话自动兼容。该列表在规划前保存，重启或无可行菜单后仍生效，菜单和建议也排除同名变体。普通局部换菜不写入此列表；新会话重新开始，当前不支持撤销拒绝记录。
+
+食材偏好在整份菜单层面尽量覆盖，不要求每道菜都包含所有偏好。已有菜单缺少偏好时可做局部交换；交换保留已覆盖偏好、硬约束和汤数。指定换菜时不会为补齐偏好扩大软修改范围；未覆盖的偏好在 `warnings` 中说明，不单独导致 `no_feasible_menu`。这是有界启发式，不保证全局最少修改。若缩减菜数后指定替换位置超出新总菜数，返回 `no_feasible_menu` 并解释冲突，不输出菜单。
 
 ## 五轮 Demo
 
