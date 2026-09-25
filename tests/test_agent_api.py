@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
-from app.domain.models import Ingredient, Intent, Recipe, UserProfile
+from app.domain.models import DinerUpdate, Ingredient, Intent, Recipe, UserProfile
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.sessions import SessionStore
@@ -362,6 +362,134 @@ def test_additional_allergies_never_clear_unresolved_terms_by_count(tmp_path, ca
         assert final["status"] == "ok"
         assert final["conversation_state"]["pending_allergy_terms"] == []
         assert set(final["conversation_state"]["constraints"]["allergies"]) == {"花生", "鸡蛋", "芝麻", "桃"}
+
+
+def test_multi_diner_shared_constraints_and_attendance_changes(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+            people=3,
+            diner_updates=[
+                DinerUpdate(
+                    diner="爸爸", aliases=["我爸"], attendance=True, allergies=["花生"]
+                ),
+                DinerUpdate(
+                    diner="妈妈", aliases=["我妈"], attendance=True, no_spicy=True
+                ),
+            ],
+        ),
+        Intent(diner_updates=[DinerUpdate(diner="我爸", attendance=False)]),
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "我和爸妈三个人晚餐，我爸花生过敏，我妈不吃辣"},
+        ).json()
+        session_id = first["conversation_state"]["session_id"]
+        second = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "爸爸今晚不参加", "session_id": session_id},
+        ).json()
+
+    assert first["status"] == "ok"
+    assert len(first["menu"]) == 4
+    assert first["conversation_state"]["constraints"]["soup_count"] == 1
+    assert first["conversation_state"]["constraints"]["allergies"] == ["花生"]
+    assert first["conversation_state"]["constraints"]["no_spicy"] is True
+    assert len(first["diner_suitability"]) == 3
+    assert all(item["hard_constraints_satisfied"] for item in first["diner_suitability"])
+    assert "逐人适配" in first["reason"]
+    assert not any(
+        "花生" in ingredient
+        for item in first["menu"]
+        for ingredient in item["ingredients"]
+    )
+
+    assert second["status"] == "ok"
+    assert second["conversation_state"]["constraints"]["people"] == 2
+    assert second["conversation_state"]["constraints"]["dish_count"] == 3
+    assert second["conversation_state"]["constraints"]["soup_count"] == 0
+    assert second["conversation_state"]["constraints"]["allergies"] == []
+    assert second["conversation_state"]["constraints"]["no_spicy"] is True
+    dad = next(
+        diner
+        for diner in second["conversation_state"]["diners"]
+        if diner["display_name"] == "爸爸"
+    )
+    assert dad["attendance"] is False
+    assert dad["allergies"] == ["花生"]
+    assert {item["display_name"] for item in second["diner_suitability"]} == {"用户", "妈妈"}
+
+
+def test_named_diners_exceeding_confirmed_people_require_clarification(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+                people=2,
+                diner_updates=[
+                    DinerUpdate(diner="爸爸", attendance=True, allergies=["花生"]),
+                    DinerUpdate(diner="妈妈", attendance=True),
+                ],
+        )
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "我们两个人吃，我爸爸和妈妈都参加"},
+        ).json()
+
+    assert result["status"] == "clarification_required"
+    assert result["menu"] == []
+    assert result["tool_calls"] == []
+    assert "3 位参餐者" in result["reason"]
+    assert result["conversation_state"]["constraints"]["allergies"] == ["花生"]
+
+
+def test_explicit_menu_structure_is_not_overridden_by_party_defaults(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+            people=3,
+            dish_count=3,
+            soup_count=0,
+            diner_updates=[
+                DinerUpdate(diner="爸爸", attendance=True),
+                DinerUpdate(diner="妈妈", attendance=True),
+            ],
+        )
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat",
+            json={
+                "user_id": 3,
+                "message": "我和爸妈三个人，没有其他忌口，明确只要三道菜，不要汤",
+            },
+        ).json()
+
+    assert result["status"] == "ok"
+    assert len(result["menu"]) == 3
+    assert result["conversation_state"]["constraints"]["dish_count"] == 3
+    assert result["conversation_state"]["constraints"]["soup_count"] == 0
+    assert result["conversation_state"]["menu_structure_explicit"] is True
+
+
+def test_unknown_attributed_allergen_stops_planning(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+            people=2,
+            diner_updates=[
+                DinerUpdate(diner="爸爸", attendance=True, allergies=["神秘酱料"])
+            ],
+        )
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "我和爸爸吃，他对神秘酱料过敏"},
+        ).json()
+
+    assert result["status"] == "clarification_required"
+    assert result["menu"] == []
+    assert result["tool_calls"] == []
+    assert "爸爸的过敏原缺少可靠映射" in result["reason"]
 
 
 def openai_payload(**changes):

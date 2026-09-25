@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from app.domain.models import Constraints, SessionState, UserProfile
+from app.domain.models import Constraints, Diner, SessionState, UserProfile
 from app.infrastructure.llm.base import LLMOutputError, LLMUnavailable
 from app.infrastructure.llm.deepseek import DeepSeekLLM
 
@@ -80,6 +80,44 @@ async def test_parse_contract_and_minimal_profile(profile, state):
         assert "fake-test-secret" not in str(payload)
 
 
+async def test_parse_attributed_diner_updates_and_send_stable_diner_context(profile, state):
+    state.diners = [
+        Diner(
+            diner_id="profile-1",
+            display_name="用户",
+            aliases=["用户", "我"],
+            profile_owner=True,
+            allergies=["花生"],
+        )
+    ]
+    observed = []
+
+    def handler(request):
+        observed.append(request)
+        return httpx.Response(200, json=completion({
+            "action": "plan",
+            "people": 2,
+            "diner_updates": [{
+                "diner": "妈妈",
+                "aliases": ["我妈"],
+                "attendance": True,
+                "no_spicy": True,
+            }],
+        }))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = DeepSeekLLM("fake-test-secret", client=client)
+        intent = await adapter.parse("我和妈妈两人吃，她不吃辣", state, profile)
+
+    assert intent.people == 2
+    assert intent.diner_updates[0].diner == "妈妈"
+    assert intent.diner_updates[0].no_spicy is True
+    context = json.loads(json.loads(observed[0].content)["messages"][1]["content"])
+    assert context["diners"][0]["diner_id"] == "profile-1"
+    assert context["diners"][0]["allergies"] == ["花生"]
+    assert "private-raw-marker" not in str(context)
+
+
 @pytest.mark.parametrize("content", [
     "", "  ", "not json", "```json\n{}\n```", "[]", "null", "{}",
     '{"action":"plan","action":"replace"}',
@@ -87,6 +125,7 @@ async def test_parse_contract_and_minimal_profile(profile, state):
     {"action": "plan", "people": "2"},
     {"action": "plan", "people": True},
     {"action": "plan", "people": 9},
+    {"action": "plan", "diner_updates": [{"diner": "爸爸", "no_spicy": False}]},
     {"action": "plan", "unexpected": "field"},
     {"action": "plan", "allergies": [""]},
     {"action": "plan", "allergies": "虾"},

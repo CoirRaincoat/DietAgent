@@ -144,6 +144,16 @@ stream=true 时，每条事件使用 `data: <JSON>\n\n`。首块声明 assistant
 
 继续使用同一 session_id，依次回答“2个人，晚餐。”“没有其他忌口，不吃辣椒，安排三道菜。”即可。确认字段记录于 conversation_state.confirmed_fields，待答字段记录于 pending_fields。模糊回答不能把默认值变成已确认；明确无其他忌口也不会撤销已知过敏。未知过敏词位于 pending_allergy_terms，必须澄清后才继续。
 
+### 多人共享菜单
+
+多人场景通过自然语言提供成员、称呼、是否参加以及归属于该人的过敏、忌口和偏好。例如：“我和爸妈三个人晚餐，我爸花生过敏，我妈不吃辣，没有其他忌口。”系统为成员保存稳定 `diner_id` 和别名；后续“爸爸今晚不参加”只改变本餐出席状态，原有个人事实仍保留。
+
+当前规划的是一桌共享菜。任何参餐者的已知过敏、排除食材和不辣要求都会合并到 `conversation_state.constraints`，供检索、规划和最终校验使用，不能用“该成员不吃这道菜”绕过。`meal_constraints` 保存未归属到某个人的整桌约束，`diners` 保存逐人成员状态。退出本餐的成员不再贡献本轮聚合约束；重新参加时其原事实重新生效。
+
+当用户没有明确菜数时，工程默认值为：1—2 人 3 道且无汤，3—4 人 4 道含 1 汤，5—6 人 5 道含 1 汤，7—8 人 6 道含 1 汤。用户明确总菜数或汤数后，后续人数变化不覆盖该结构。已确认总人数小于实名参餐者数量、称呼映射不唯一、或个人过敏词无法可靠映射时，接口返回 `clarification_required`，不会执行检索和规划。
+
+成功响应新增 `diner_suitability`。每位当前参餐者分别返回已知约束、硬约束是否满足、违反项、未覆盖的软偏好及范围说明。该字段只对已提供事实做核对，不推断未提供的疾病、营养数值或健康结论；未实名的其余人数会在 `warnings` 和 `constraints` 中说明信息仍未知。
+
 ### 完整响应结构
 
 | 字段 | 用途 |
@@ -154,6 +164,7 @@ stream=true 时，每条事件使用 `data: <JSON>\n\n`。首块声明 assistant
 | reason | 程序核验事实组成的解释，模型仅选择事实 ID |
 | constraints | 已确认约束及尚待确认信息的中文说明 |
 | conversation_state | 会话 ID、版本、确认字段、约束、菜单有效性、rejected_recipe_ids 及有限历史 |
+| diner_suitability | 当前参餐者逐人已知约束核验；不把未知信息写成已满足 |
 | clarification_questions | field、prompt、options，可直接用于前端提问 |
 | nutrition_analysis | 整餐定性组成、目标匹配、食材贡献与风险；无菜单时 null |
 | replacement_suggestions | 适用于指定槽位的库内候选，不自动应用 |

@@ -24,8 +24,18 @@ export interface Constraints {
   preferences: string[]; health_goals: string[]; no_spicy: boolean; meal_type: string;
   dish_count: number; soup_count: number; people: number; max_minutes: number | null;
 }
+export interface Diner {
+  diner_id: string; display_name: string; aliases: string[]; attendance: boolean; profile_owner: boolean;
+  allergies: string[]; excluded_ingredients: string[]; preferred_ingredients: string[];
+  preferences: string[]; health_goals: string[]; no_spicy: boolean;
+}
+export interface DinerSuitability {
+  diner_id: string; display_name: string; hard_constraints_satisfied: boolean;
+  known_constraints: string[]; violations: string[]; unmet_preferences: string[]; scope_note: string;
+}
 export interface SessionState {
   session_id: string; user_id: number; revision: number; constraints: Constraints;
+  meal_constraints: Constraints | null; diners: Diner[]; menu_structure_explicit: boolean;
   menu_ids: string[]; menu_valid: boolean; pending_allergy: boolean; pending_allergy_terms: string[];
   pending_clarification: string | null; last_message: string; history: {role:string;content:string}[];
   confirmed_fields: string[]; pending_fields: string[];
@@ -37,6 +47,7 @@ export interface ChatResult {
   replacement_suggestions: MenuItem[]; warnings: string[];
   tool_calls: {name: string; summary: Record<string, unknown>}[]; timings_ms: Record<string, number>;
   explanation_source: string; clarification_questions: ClarificationQuestion[]; nutrition_analysis: MenuNutrition | null;
+  diner_suitability: DinerSuitability[];
 }
 export interface ChatRequest { user_id: number; message: string; request_id: string; session_id?: string }
 export interface DemoProfile { user_id: number; label: string; allergies: string[]; health_goals: string[]; preferences: string[] }
