@@ -193,7 +193,12 @@ async def test_actual_catalog_preference_is_applied_and_survives_explanation(tmp
     sid = first.conversation_state.session_id
     second = await agent.chat(900001, "希望这餐有牛肉", session_id=sid)
     assert first.status == second.status == "ok"
-    assert sum(a.recipe_id != b.recipe_id for a, b in zip(first.menu, second.menu)) == 1
+    first_already_covers_beef = any(
+        "牛肉" in item.steps or any("牛肉" in ingredient for ingredient in item.ingredients)
+        for item in first.menu
+    )
+    changed = sum(a.recipe_id != b.recipe_id for a, b in zip(first.menu, second.menu))
+    assert changed == (0 if first_already_covers_beef else 1)
     # The source may name an ingredient only in its cooking steps.
     assert any(
         "牛肉" in item.steps or any("牛肉" in ingredient for ingredient in item.ingredients)

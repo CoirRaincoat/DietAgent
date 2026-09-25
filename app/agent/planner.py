@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 
+from app.agent.menu_balance import balance_rank
 from app.domain.models import Constraints, Recipe
 from app.rules.engine import RuleDecision, RuleEngine, compact
 
@@ -59,11 +60,6 @@ class MenuPlanner:
                 result |= covers[recipe.recipe_id]
             return result
 
-        def categories(menu: list[Recipe]) -> set[str]:
-            return {category for recipe in menu for category in recipe.categories} & {
-                "protein", "vegetable", "staple",
-            }
-
         if coverage(recipes) == (1 << len(terms)) - 1:
             return recipes, set(), []
         covers.update({
@@ -77,7 +73,7 @@ class MenuPlanner:
         for _ in terms:
             before_mask = coverage(menu)
             used = {recipe.recipe_id for recipe in menu}
-            before_categories = categories(menu)
+            before_balance = balance_rank(menu, constraints.dish_count)
             best: tuple[tuple, int, Recipe] | None = None
             for index in positions:
                 old = menu[index]
@@ -95,9 +91,13 @@ class MenuPlanner:
                     new_change = int(
                         index < len(current) and current[index].recipe_id == old.recipe_id
                     )
-                    lost_categories = len(before_categories - categories([*rest, candidate]))
+                    candidate_balance = balance_rank([*rest, candidate], constraints.dish_count)
+                    balance_loss = tuple(
+                        max(0, before - after)
+                        for before, after in zip(before_balance, candidate_balance)
+                    )
                     rank = (
-                        -gain, new_change, lost_categories,
+                        -gain, new_change, balance_loss,
                         -decisions[candidate.recipe_id].score,
                         order.get(candidate.recipe_id, len(order)), index, candidate.recipe_id,
                     )
@@ -193,14 +193,14 @@ class MenuPlanner:
 
         def choose(pool: list[Recipe]) -> Recipe:
             selected = [item for item in slots if item is not None]
-            covered = {category for item in selected for category in item.categories}
-            methods = {method for item in selected for method in item.methods}
-            def rank(recipe: Recipe) -> tuple[float, int, str]:
-                new_categories = (set(recipe.categories) - covered) & {"protein", "vegetable", "staple"}
-                diversity = 4 * len(new_categories)
-                method_bonus = 0.5 if set(recipe.methods) - methods else 0
-                value = decisions[recipe.recipe_id].score + diversity + method_bonus
-                return (-value, order.get(recipe.recipe_id, len(order)), recipe.recipe_id)
+            def rank(recipe: Recipe) -> tuple:
+                balance = balance_rank([*selected, recipe], count)
+                return (
+                    *(-value for value in balance),
+                    -decisions[recipe.recipe_id].score,
+                    order.get(recipe.recipe_id, len(order)),
+                    recipe.recipe_id,
+                )
 
             return min((r for r in pool if r.recipe_id not in used), key=rank)
 

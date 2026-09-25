@@ -127,3 +127,27 @@ def test_absent_or_empty_label_filter_preserves_full_catalog_fallback():
     assert {item.recipe_id for item in baseline} == {"a", "b"}
     assert retriever.search([], Constraints(), required_labels=None) == baseline
     assert retriever.search([], Constraints(), required_labels=[]) == baseline
+
+
+def test_four_dish_menu_prefers_two_vegetable_dishes_over_repeated_protein():
+    protein_one = recipe("p1", "鸡肉", "protein")
+    protein_one.methods = ["蒸"]
+    protein_two = recipe("p2", "牛肉", "protein")
+    protein_two.methods = ["炒"]
+    vegetable_one = recipe("v1", "白菜", "vegetable")
+    vegetable_one.methods = ["煮"]
+    vegetable_two = recipe("v2", "西兰花", "vegetable")
+    vegetable_two.methods = ["拌"]
+    staple = recipe("s1", "米饭", "staple")
+    staple.methods = ["焖"]
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [protein_one, protein_two, vegetable_one, vegetable_two, staple],
+        Constraints(dish_count=4),
+    )
+
+    assert result.failure is None
+    assert sum("vegetable" in item.categories for item in result.recipes) == 2
+    assert {"protein", "vegetable", "staple"} <= {
+        category for item in result.recipes for category in item.categories
+    }
