@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -488,3 +490,143 @@ def test_unknown_attributed_allergen_stops_planning(tmp_path, catalog):
     assert result["menu"] == []
     assert result["tool_calls"] == []
     assert "爸爸的过敏原缺少可靠映射" in result["reason"]
+
+
+def openai_payload(**changes):
+    payload = {
+        "model": "fangtai-meal-agent",
+        "messages": [{"role": "user", "content": "1人晚餐，没有其他忌口"}],
+        "user": "3",
+        "stream": False,
+    }
+    payload.update(changes)
+    return payload
+
+
+def parse_sse(body):
+    records = [record for record in body.split("\n\n") if record]
+    assert records[-1] == "data: [DONE]"
+    return [json.loads(record.removeprefix("data: ")) for record in records[:-1]]
+
+
+def test_openai_nonstreaming_response_and_session_headers(tmp_path, catalog):
+    with client_for(tmp_path, catalog, ScriptedLLM()) as client:
+        response = client.post("/v1/chat/completions", json=openai_payload())
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"id", "object", "created", "model", "choices"}
+    assert body["id"].startswith("chatcmpl-")
+    assert body["object"] == "chat.completion"
+    assert body["model"] == "fangtai-meal-agent"
+    assert body["choices"][0]["message"]["role"] == "assistant"
+    assert body["choices"][0]["message"]["content"]
+    assert body["choices"][0]["finish_reason"] == "stop"
+    assert response.headers["x-session-id"]
+    assert response.headers["x-request-id"].startswith("req_")
+
+
+def test_openai_sse_chunks_reconstruct_verified_answer(tmp_path, catalog):
+    with client_for(tmp_path, catalog, ScriptedLLM()) as client:
+        with client.stream(
+            "POST", "/v1/chat/completions", json=openai_payload(stream=True)
+        ) as response:
+            body = "".join(response.iter_text())
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    chunks = parse_sse(body)
+    assert len({chunk["id"] for chunk in chunks}) == 1
+    assert len({chunk["created"] for chunk in chunks}) == 1
+    assert chunks[0]["object"] == "chat.completion.chunk"
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
+    assert chunks[-1]["choices"][0]["delta"] == {}
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    content = "".join(
+        chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
+    )
+    assert "本餐菜品均来自方太菜谱库" in content
+
+
+def test_openai_followup_uses_response_session_header(tmp_path, catalog):
+    llm = ScriptedLLM([complete_intent(), Intent(action="replace", replace_slot=2)])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", json=openai_payload())
+        session_id = first.headers["x-session-id"]
+        second = client.post(
+            "/v1/chat/completions",
+            headers={"X-Session-ID": session_id},
+            json=openai_payload(messages=[{"role": "user", "content": "只换第二道菜"}]),
+        )
+    assert second.status_code == 200
+    assert second.headers["x-session-id"] == session_id
+    assert llm.parse_calls == 2
+
+
+def test_openai_conflicting_identity_sources_fail_before_agent(tmp_path, catalog):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json=openai_payload(context={"user_id": 4}),
+        )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "identity_conflict"
+    assert llm.parse_calls == 0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        openai_payload(user=None),
+        openai_payload(
+            messages=[
+                {"role": "user", "content": "第一轮"},
+                {"role": "user", "content": "第二轮"},
+            ]
+        ),
+        openai_payload(stream=True, stream_options={"include_usage": True}),
+        openai_payload(model="unknown-model"),
+        openai_payload(temperature=0.3),
+    ],
+)
+def test_openai_unsupported_request_subset_has_error_envelope(tmp_path, catalog, payload):
+    with client_for(tmp_path, catalog, ScriptedLLM()) as client:
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 422
+    assert set(response.json()) == {"error"}
+    assert response.json()["error"]["type"] == "invalid_request_error"
+
+
+def test_openai_provider_error_happens_before_sse_headers(tmp_path, catalog):
+    llm = ScriptedLLM()
+    llm.parse_error = LLMUnavailable("timeout")
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post(
+            "/v1/chat/completions", json=openai_payload(stream=True)
+        )
+    assert response.status_code == 503
+    assert not response.headers["content-type"].startswith("text/event-stream")
+    assert response.json()["error"]["code"] == "llm_unavailable"
+
+
+def test_openai_original_profile_block_has_specific_permission_error(tmp_path, catalog):
+    llm = ScriptedLLM()
+    llm.parse_error = LLMUnavailable("original_profile_blocked")
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", json=openai_payload())
+    assert response.status_code == 403
+    assert response.json()["error"]["type"] == "permission_error"
+    assert response.json()["error"]["code"] == "original_profile_blocked"
+
+
+def test_openai_client_request_id_replays_business_result(tmp_path, catalog):
+    llm = ScriptedLLM()
+    headers = {"X-Client-Request-Id": "openai-retry-1"}
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", headers=headers, json=openai_payload())
+        second = client.post("/v1/chat/completions", headers=headers, json=openai_payload())
+    assert first.status_code == second.status_code == 200
+    assert first.headers["x-session-id"] == second.headers["x-session-id"]
+    assert first.json()["choices"][0]["message"] == second.json()["choices"][0]["message"]
+    assert llm.parse_calls == 1
