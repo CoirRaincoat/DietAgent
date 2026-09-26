@@ -121,6 +121,7 @@ class DeepSeekLLM(BaseLLM):
         payload = {
             "message": message,
             "existing_constraints": state.constraints.model_dump(),
+            "diners": [diner.model_dump() for diner in state.diners],
             "confirmed_fields": state.confirmed_fields,
             "pending_fields": state.pending_fields,
             "pending_allergy_terms": state.pending_allergy_terms,
@@ -175,6 +176,22 @@ class DeepSeekLLM(BaseLLM):
                 raise ValueError("Invalid constraint list")
         if len(intent.allergy_clarifications) > 10:
             raise ValueError("Too many allergy clarifications")
+        if len(intent.diner_updates) > 8:
+            raise ValueError("Too many diner updates")
+        for update in intent.diner_updates:
+            if update.no_spicy is False:
+                raise ValueError("Cannot silently withdraw a diner safety constraint")
+            values = [
+                update.diner,
+                *update.aliases,
+                *update.allergies,
+                *update.excluded_ingredients,
+                *update.preferred_ingredients,
+                *update.preferences,
+                *update.health_goals,
+            ]
+            if any(not value.strip() or len(value) > 100 for value in values):
+                raise ValueError("Invalid diner update")
         for pending, values in intent.allergy_clarifications.items():
             if (
                 pending not in state.pending_allergy_terms or not values or len(values) > 10

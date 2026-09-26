@@ -54,6 +54,36 @@ class UserProfile(DomainModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+class DinerUpdate(DomainModel):
+    """One explicitly attributed participant update extracted from a turn."""
+
+    diner: str = Field(min_length=1, max_length=50)
+    aliases: list[str] = Field(default_factory=list, max_length=10)
+    attendance: bool | None = None
+    allergies: list[str] = Field(default_factory=list, max_length=30)
+    excluded_ingredients: list[str] = Field(default_factory=list, max_length=30)
+    preferred_ingredients: list[str] = Field(default_factory=list, max_length=30)
+    preferences: list[str] = Field(default_factory=list, max_length=30)
+    health_goals: list[str] = Field(default_factory=list, max_length=30)
+    no_spicy: bool | None = None
+
+
+class Diner(DomainModel):
+    """Stable participant identity and only the facts attributed to that person."""
+
+    diner_id: str
+    display_name: str = Field(min_length=1, max_length=50)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+    attendance: bool = True
+    profile_owner: bool = False
+    allergies: list[str] = Field(default_factory=list)
+    excluded_ingredients: list[str] = Field(default_factory=list)
+    preferred_ingredients: list[str] = Field(default_factory=list)
+    preferences: list[str] = Field(default_factory=list)
+    health_goals: list[str] = Field(default_factory=list)
+    no_spicy: bool = False
+
+
 class Constraints(DomainModel):
     allergies: list[str] = Field(default_factory=list)
     excluded_ingredients: list[str] = Field(default_factory=list)
@@ -74,6 +104,7 @@ class Intent(DomainModel):
     excluded_ingredients: list[str] = Field(default_factory=list)
     allergies: list[str] = Field(default_factory=list)
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
+    diner_updates: list[DinerUpdate] = Field(default_factory=list, max_length=8)
     preferred_ingredients: list[str] = Field(default_factory=list)
     health_goals: list[str] = Field(default_factory=list)
     preferences: list[str] = Field(default_factory=list)
@@ -114,6 +145,9 @@ class SessionState(DomainModel):
     user_id: int
     revision: int = 0
     constraints: Constraints = Field(default_factory=Constraints)
+    meal_constraints: Constraints | None = None
+    diners: list[Diner] = Field(default_factory=list, max_length=8)
+    menu_structure_explicit: bool = False
     menu_ids: list[str] = Field(default_factory=list)
     # Explicitly rejected dishes remain excluded for this single-meal session.
     # Ordinary local replacement does not create a lasting food restriction.
@@ -138,6 +172,18 @@ class ClarificationQuestion(DomainModel):
     options: list[str] = Field(default_factory=list)
 
 
+class DinerSuitability(DomainModel):
+    """Per-person validation summary over known facts only."""
+
+    diner_id: str
+    display_name: str
+    hard_constraints_satisfied: bool
+    known_constraints: list[str] = Field(default_factory=list)
+    violations: list[str] = Field(default_factory=list)
+    unmet_preferences: list[str] = Field(default_factory=list)
+    scope_note: str
+
+
 
 class ToolEvent(DomainModel):
     name: str
@@ -158,3 +204,4 @@ class ChatResult(DomainModel):
     explanation_source: str = "verified_template"
     clarification_questions: list[ClarificationQuestion] = Field(default_factory=list)
     nutrition_analysis: MenuNutrition | None = None
+    diner_suitability: list[DinerSuitability] = Field(default_factory=list)

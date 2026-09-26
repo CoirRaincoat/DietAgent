@@ -11,6 +11,13 @@ from app.agent.clarification import (
     explicit_allergy_resolution,
     missing_questions,
 )
+from app.agent.diners import (
+    DinerConflict,
+    aggregate_constraints,
+    apply_diner_updates,
+    diner_suitability,
+    profile_diner,
+)
 from app.agent.menu_balance import analyze_menu_balance, balance_summary
 from app.agent.planner import MenuPlanner, PlanResult
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
@@ -18,11 +25,13 @@ from app.domain.models import (
     ChatResult,
     ClarificationQuestion,
     Constraints,
+    Diner,
     Intent,
     MenuItem,
     Recipe,
     SessionState,
     ToolEvent,
+    UserProfile,
 )
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
@@ -87,17 +96,18 @@ class MealAgent:
                     return cached
             profile = self.catalog.profiles[user_id]
             if state is None:
+                diners = [profile_diner(profile)]
+                meal_constraints = Constraints()
                 state = SessionState(
                     session_id=session_id, user_id=user_id,
                     confirmed_fields=["restrictions"] if profile.allergies else [],
-                    constraints=Constraints(
-                        allergies=list(profile.allergies),
-                        preferences=list(profile.preferences),
-                        health_goals=list(profile.health_goals),
-                    ),
+                    constraints=aggregate_constraints(meal_constraints, diners),
+                    meal_constraints=meal_constraints,
+                    diners=diners,
                 )
                 expected_revision = None
             else:
+                self._ensure_diner_state(state, profile)
                 expected_revision = state.revision
             started = perf_counter()
             intent = await self.llm.parse(message, state, profile)
@@ -130,12 +140,26 @@ class MealAgent:
             return result
 
     def _apply_intent(self, state: SessionState, intent: Intent, message: str) -> str | None:
-        constraints = state.constraints
+        meal_constraints = state.meal_constraints or state.constraints.model_copy(deep=True)
+        state.meal_constraints = meal_constraints
+        constraints = meal_constraints
+        for update in intent.diner_updates:
+            unresolved_diner = self.rules.unresolved_allergies(
+                Constraints(allergies=update.allergies)
+            )
+            if unresolved_diner:
+                return (
+                    f"{update.diner}的过敏原缺少可靠映射，请明确具体食材："
+                    + "、".join(unresolved_diner)
+                )
         confirm_from_intent(state, intent, message)
         positive_allergy_text = re.sub(
             r"(?:没有|没|无)(?:任何|其他|额外)?(?:食物|食材)?过敏(?:史)?|不(?:会)?过敏|非过敏", "", message
         )
-        if "过敏" in positive_allergy_text and not intent.allergies:
+        attributed_allergies = [
+            allergy for update in intent.diner_updates for allergy in update.allergies
+        ]
+        if "过敏" in positive_allergy_text and not intent.allergies and not attributed_allergies:
             state.pending_allergy = True
         # Unknown terms are pending questions, not permanent hard constraints.
         # Clarification can resolve them, while already known allergens never disappear.
@@ -173,10 +197,40 @@ class MealAgent:
         constraints.preferred_ingredients = _merge(
             constraints.preferred_ingredients, intent.preferred_ingredients
         )
+        previous_active_count = sum(diner.attendance for diner in state.diners)
+        try:
+            state.diners = apply_diner_updates(
+                state.diners, intent.diner_updates, session_id=state.session_id
+            )
+        except DinerConflict as error:
+            state.constraints = aggregate_constraints(constraints, state.diners)
+            return str(error)
         for name in ("dish_count", "soup_count", "people", "max_minutes"):
             value = getattr(intent, name)
             if value is not None:
                 setattr(constraints, name, value)
+        if intent.dish_count is not None or intent.soup_count is not None:
+            state.menu_structure_explicit = True
+        attendance_changed = any(
+            update.attendance is not None for update in intent.diner_updates
+        )
+        active_count = sum(diner.attendance for diner in state.diners)
+        if (
+            attendance_changed
+            and intent.people is None
+            and "people" in state.confirmed_fields
+            and previous_active_count == constraints.people
+        ):
+            constraints.people = max(1, active_count)
+        if active_count > constraints.people and "people" in state.confirmed_fields:
+            state.constraints = aggregate_constraints(constraints, state.diners)
+            return (
+                f"当前记录了 {active_count} 位参餐者，但总人数是 {constraints.people} 人；"
+                "请确认谁参加本餐。"
+            )
+        if (intent.people is not None or attendance_changed) and not state.menu_structure_explicit:
+            self._apply_party_structure_defaults(constraints)
+        state.constraints = aggregate_constraints(constraints, state.diners)
         if intent.meal_type:
             if intent.meal_type not in {"早餐", "午餐", "晚餐", "夜宵", "下午茶"}:
                 return "请说明要安排早餐、午餐、晚餐还是加餐。"
@@ -185,7 +239,7 @@ class MealAgent:
             constraints.inventory = intent.inventory
         if intent.no_spicy is True:
             constraints.no_spicy = True
-        elif intent.no_spicy is False and constraints.no_spicy:
+        elif intent.no_spicy is False and state.constraints.no_spicy:
             return "当前会话保留了不吃辣的要求；如要撤销，请另开会话明确本餐要求。"
         if intent.clear_time_limit:
             if re.search(
@@ -195,13 +249,14 @@ class MealAgent:
                 constraints.max_minutes = None
             else:
                 return "请明确是否取消总耗时限制。"
+        state.constraints = aggregate_constraints(constraints, state.diners)
         if state.pending_allergy:
             details = "（请逐一明确：" + "、".join(state.pending_allergy_terms) + "）" if state.pending_allergy_terms else ""
             return "尚未明确具体过敏食材，请先补充过敏信息" + details + "；此前菜单暂不作为可用建议。"
-        unresolved = self.rules.unresolved_allergies(constraints)
+        unresolved = self.rules.unresolved_allergies(state.constraints)
         if unresolved:
             return "当前词典无法确认这些过敏原，请明确具体食材：" + "、".join(unresolved)
-        if constraints.soup_count > constraints.dish_count:
+        if state.constraints.soup_count > state.constraints.dish_count:
             return "汤的数量不能超过总菜数，请明确总共几道，其中几道汤。"
         if intent.action == "clarify" or intent.clarification:
             return intent.clarification or "请补充本餐需要调整的具体要求。"
@@ -210,7 +265,37 @@ class MealAgent:
             return "规划前还需要确认：" + " ".join(question.prompt for question in questions)
         return None
 
-    def _constraints_text(self, constraints: Constraints, confirmed: list[str]) -> list[str]:
+    @staticmethod
+    def _apply_party_structure_defaults(constraints: Constraints) -> None:
+        """Apply documented engineering defaults only when structure was not explicit."""
+        if constraints.people <= 2:
+            constraints.dish_count = 3
+            constraints.soup_count = 0
+        elif constraints.people <= 4:
+            constraints.dish_count = 4
+            constraints.soup_count = 1
+        elif constraints.people <= 6:
+            constraints.dish_count = 5
+            constraints.soup_count = 1
+        else:
+            constraints.dish_count = 6
+            constraints.soup_count = 1
+
+    @staticmethod
+    def _ensure_diner_state(state: SessionState, profile: UserProfile) -> None:
+        """Upgrade pre-PR3 session snapshots conservatively on first access."""
+        if state.meal_constraints is None:
+            state.meal_constraints = state.constraints.model_copy(deep=True)
+        if not state.diners:
+            state.diners = [profile_diner(profile)]
+        state.constraints = aggregate_constraints(state.meal_constraints, state.diners)
+
+    def _constraints_text(
+        self,
+        constraints: Constraints,
+        confirmed: list[str],
+        diners: list[Diner] | None = None,
+    ) -> list[str]:
         people = f"{constraints.people} 人" if "people" in confirmed else "人数待确认"
         meal = constraints.meal_type if "meal_type" in confirmed else "餐次待确认"
         items = [f"{people}，{meal}，共 {constraints.dish_count} 道（含汤）"]
@@ -226,6 +311,21 @@ class MealAgent:
             items.append(f"要求整餐不超过 {constraints.max_minutes} 分钟（当前数据无法验证）")
         if constraints.inventory is not None:
             items.append("仅使用指定食材：" + "、".join(constraints.inventory))
+        for diner in diners or []:
+            if not diner.attendance:
+                continue
+            details = []
+            if diner.allergies:
+                details.append("过敏=" + "、".join(diner.allergies))
+            if diner.excluded_ingredients:
+                details.append("不吃=" + "、".join(diner.excluded_ingredients))
+            if diner.no_spicy:
+                details.append("不吃辣")
+            if details:
+                items.append(f"{diner.display_name}：" + "；".join(details))
+        active_count = sum(diner.attendance for diner in diners or [])
+        if "people" in confirmed and active_count < constraints.people:
+            items.append(f"其余 {constraints.people - active_count} 位用餐者的个人限制尚未提供")
         return items
 
     def _unresolved(
@@ -248,7 +348,9 @@ class MealAgent:
         state.pending_fields = [question.field for question in questions]
         return ChatResult(
             status=status, reason=reason,
-            constraints=self._constraints_text(state.constraints, state.confirmed_fields),
+            constraints=self._constraints_text(
+                state.constraints, state.confirmed_fields, state.diners
+            ),
             conversation_state=state, tool_calls=events, clarification_questions=questions,
             warnings=["旧菜单尚未通过当前约束校验，不作为本轮推荐。"],
         )
@@ -376,6 +478,9 @@ class MealAgent:
             "nutrition_analysis", events, recipes=chosen, constraints=constraints,
         )
         menu_balance = analyze_menu_balance(chosen)
+        suitability = diner_suitability(chosen, state.diners, self.rules)
+        if any(not item.hard_constraints_satisfied for item in suitability):
+            raise RuntimeError("Final per-diner validation failed")
         state.menu_ids = chosen_ids
         state.menu_valid = True
         state.pending_clarification = None
@@ -386,6 +491,24 @@ class MealAgent:
             "balance": balance_summary(menu_balance),
             "nutrition": "营养说明基于食材和做法作定性分析，未计算热量、蛋白质、糖或钠的精确含量。",
         }
+        active_diners = [diner for diner in state.diners if diner.attendance]
+        if len(active_diners) > 1:
+            diner_facts = []
+            for diner in active_diners:
+                hard = []
+                if diner.allergies:
+                    hard.append("过敏=" + "、".join(diner.allergies))
+                if diner.excluded_ingredients:
+                    hard.append("不吃=" + "、".join(diner.excluded_ingredients))
+                if diner.no_spicy:
+                    hard.append("不吃辣")
+                diner_facts.append(
+                    f"{diner.display_name}（{'；'.join(hard) if hard else '未提供个人硬约束'}）"
+                )
+            facts["diners"] = (
+                "逐人适配：" + "、".join(diner_facts)
+                + "的已知硬约束均已按共享菜单核对；未提供信息保持未知。"
+            )
         if previous_ids:
             kept = sum(old == new for old, new in zip(previous_ids, chosen_ids))
             facts["changes"] = (
@@ -400,15 +523,22 @@ class MealAgent:
         warnings.append("缺少份数与完整营养数据，尚不支持逐人定量摄入或健康效果判断。")
         if constraints.people > 1:
             warnings.append("当前按共享菜单聚合已提供的限制；其他用餐者未提供的健康信息仍未知。")
+        active_count = sum(diner.attendance for diner in state.diners)
+        if active_count < constraints.people:
+            warnings.append(
+                f"已记录 {active_count} 位具体用餐者；其余 {constraints.people - active_count} 位的"
+                "个人限制未知。"
+            )
         planning_finished = perf_counter()
         source = "deepseek_verified_facts"
         try:
             selected = await self.llm.explain(facts)
             if not selected or any(key not in facts for key in selected):
                 raise ValueError("Unknown explanation fact")
-            selected = list(dict.fromkeys(
-                ["catalog", "constraints", "balance"] + selected + ["nutrition"]
-            ))
+            required_facts = ["catalog", "constraints", "balance"]
+            if "diners" in facts:
+                required_facts.append("diners")
+            selected = list(dict.fromkeys(required_facts + selected + ["nutrition"]))
             reason = "\n".join(facts[key] for key in selected)
         except (LLMUnavailable, LLMOutputError, ValueError):
             source = "verified_template"
@@ -416,9 +546,12 @@ class MealAgent:
             warnings.append("模型解释暂不可用，已使用同一份验证事实生成说明。")
         return ChatResult(
             status="ok", menu=menu, reason=reason,
-            constraints=self._constraints_text(constraints, state.confirmed_fields), conversation_state=state,
+            constraints=self._constraints_text(
+                constraints, state.confirmed_fields, state.diners
+            ), conversation_state=state,
             replacement_suggestions=suggestions, warnings=list(dict.fromkeys(warnings)),
             nutrition_analysis=nutrition,
+            diner_suitability=suitability,
             tool_calls=events, explanation_source=source,
             timings_ms={
                 "retrieval_rules_planning": round((planning_finished - started) * 1000, 2),

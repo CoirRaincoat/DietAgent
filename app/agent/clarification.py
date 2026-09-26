@@ -33,8 +33,15 @@ def confirm_from_intent(state: SessionState, intent: Intent, message: str) -> No
         confirmed.add("people")
     if intent.meal_type in MEAL_TYPES:
         confirmed.add("meal_type")
+    attributed_restrictions = any(
+        update.allergies
+        or update.excluded_ingredients
+        or update.no_spicy is True
+        for update in intent.diner_updates
+    )
     if (
         intent.allergies or intent.excluded_ingredients or intent.no_spicy is True
+        or attributed_restrictions
         or (intent.restrictions_confirmed and restriction_acknowledged(message, state))
     ):
         confirmed.add("restrictions")

@@ -1,8 +1,10 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
-from app.domain.models import Ingredient, Intent, Recipe, UserProfile
+from app.domain.models import DinerUpdate, Ingredient, Intent, Recipe, UserProfile
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.sessions import SessionStore
@@ -365,3 +367,271 @@ def test_additional_allergies_never_clear_unresolved_terms_by_count(tmp_path, ca
         assert final["status"] == "ok"
         assert final["conversation_state"]["pending_allergy_terms"] == []
         assert set(final["conversation_state"]["constraints"]["allergies"]) == {"花生", "鸡蛋", "芝麻", "桃"}
+
+
+def test_multi_diner_shared_constraints_and_attendance_changes(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+            people=3,
+            diner_updates=[
+                DinerUpdate(
+                    diner="爸爸", aliases=["我爸"], attendance=True, allergies=["花生"]
+                ),
+                DinerUpdate(
+                    diner="妈妈", aliases=["我妈"], attendance=True, no_spicy=True
+                ),
+            ],
+        ),
+        Intent(diner_updates=[DinerUpdate(diner="我爸", attendance=False)]),
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "我和爸妈三个人晚餐，我爸花生过敏，我妈不吃辣"},
+        ).json()
+        session_id = first["conversation_state"]["session_id"]
+        second = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "爸爸今晚不参加", "session_id": session_id},
+        ).json()
+
+    assert first["status"] == "ok"
+    assert len(first["menu"]) == 4
+    assert first["conversation_state"]["constraints"]["soup_count"] == 1
+    assert first["conversation_state"]["constraints"]["allergies"] == ["花生"]
+    assert first["conversation_state"]["constraints"]["no_spicy"] is True
+    assert len(first["diner_suitability"]) == 3
+    assert all(item["hard_constraints_satisfied"] for item in first["diner_suitability"])
+    assert "逐人适配" in first["reason"]
+    assert not any(
+        "花生" in ingredient
+        for item in first["menu"]
+        for ingredient in item["ingredients"]
+    )
+
+    assert second["status"] == "ok"
+    assert second["conversation_state"]["constraints"]["people"] == 2
+    assert second["conversation_state"]["constraints"]["dish_count"] == 3
+    assert second["conversation_state"]["constraints"]["soup_count"] == 0
+    assert second["conversation_state"]["constraints"]["allergies"] == []
+    assert second["conversation_state"]["constraints"]["no_spicy"] is True
+    dad = next(
+        diner
+        for diner in second["conversation_state"]["diners"]
+        if diner["display_name"] == "爸爸"
+    )
+    assert dad["attendance"] is False
+    assert dad["allergies"] == ["花生"]
+    assert {item["display_name"] for item in second["diner_suitability"]} == {"用户", "妈妈"}
+
+
+def test_named_diners_exceeding_confirmed_people_require_clarification(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+                people=2,
+                diner_updates=[
+                    DinerUpdate(diner="爸爸", attendance=True, allergies=["花生"]),
+                    DinerUpdate(diner="妈妈", attendance=True),
+                ],
+        )
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "我们两个人吃，我爸爸和妈妈都参加"},
+        ).json()
+
+    assert result["status"] == "clarification_required"
+    assert result["menu"] == []
+    assert result["tool_calls"] == []
+    assert "3 位参餐者" in result["reason"]
+    assert result["conversation_state"]["constraints"]["allergies"] == ["花生"]
+
+
+def test_explicit_menu_structure_is_not_overridden_by_party_defaults(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+            people=3,
+            dish_count=3,
+            soup_count=0,
+            diner_updates=[
+                DinerUpdate(diner="爸爸", attendance=True),
+                DinerUpdate(diner="妈妈", attendance=True),
+            ],
+        )
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat",
+            json={
+                "user_id": 3,
+                "message": "我和爸妈三个人，没有其他忌口，明确只要三道菜，不要汤",
+            },
+        ).json()
+
+    assert result["status"] == "ok"
+    assert len(result["menu"]) == 3
+    assert result["conversation_state"]["constraints"]["dish_count"] == 3
+    assert result["conversation_state"]["constraints"]["soup_count"] == 0
+    assert result["conversation_state"]["menu_structure_explicit"] is True
+
+
+def test_unknown_attributed_allergen_stops_planning(tmp_path, catalog):
+    llm = ScriptedLLM([
+        complete_intent(
+            people=2,
+            diner_updates=[
+                DinerUpdate(diner="爸爸", attendance=True, allergies=["神秘酱料"])
+            ],
+        )
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post(
+            "/chat",
+            json={"user_id": 3, "message": "我和爸爸吃，他对神秘酱料过敏"},
+        ).json()
+
+    assert result["status"] == "clarification_required"
+    assert result["menu"] == []
+    assert result["tool_calls"] == []
+    assert "爸爸的过敏原缺少可靠映射" in result["reason"]
+
+
+def openai_payload(**changes):
+    payload = {
+        "model": "fangtai-meal-agent",
+        "messages": [{"role": "user", "content": "1人晚餐，没有其他忌口"}],
+        "user": "3",
+        "stream": False,
+    }
+    payload.update(changes)
+    return payload
+
+
+def parse_sse(body):
+    records = [record for record in body.split("\n\n") if record]
+    assert records[-1] == "data: [DONE]"
+    return [json.loads(record.removeprefix("data: ")) for record in records[:-1]]
+
+
+def test_openai_nonstreaming_response_and_session_headers(tmp_path, catalog):
+    with client_for(tmp_path, catalog, ScriptedLLM()) as client:
+        response = client.post("/v1/chat/completions", json=openai_payload())
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"id", "object", "created", "model", "choices"}
+    assert body["id"].startswith("chatcmpl-")
+    assert body["object"] == "chat.completion"
+    assert body["model"] == "fangtai-meal-agent"
+    assert body["choices"][0]["message"]["role"] == "assistant"
+    assert body["choices"][0]["message"]["content"]
+    assert body["choices"][0]["finish_reason"] == "stop"
+    assert response.headers["x-session-id"]
+    assert response.headers["x-request-id"].startswith("req_")
+
+
+def test_openai_sse_chunks_reconstruct_verified_answer(tmp_path, catalog):
+    with client_for(tmp_path, catalog, ScriptedLLM()) as client:
+        with client.stream(
+            "POST", "/v1/chat/completions", json=openai_payload(stream=True)
+        ) as response:
+            body = "".join(response.iter_text())
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    chunks = parse_sse(body)
+    assert len({chunk["id"] for chunk in chunks}) == 1
+    assert len({chunk["created"] for chunk in chunks}) == 1
+    assert chunks[0]["object"] == "chat.completion.chunk"
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
+    assert chunks[-1]["choices"][0]["delta"] == {}
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    content = "".join(
+        chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
+    )
+    assert "本餐菜品均来自方太菜谱库" in content
+
+
+def test_openai_followup_uses_response_session_header(tmp_path, catalog):
+    llm = ScriptedLLM([complete_intent(), Intent(action="replace", replace_slot=2)])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", json=openai_payload())
+        session_id = first.headers["x-session-id"]
+        second = client.post(
+            "/v1/chat/completions",
+            headers={"X-Session-ID": session_id},
+            json=openai_payload(messages=[{"role": "user", "content": "只换第二道菜"}]),
+        )
+    assert second.status_code == 200
+    assert second.headers["x-session-id"] == session_id
+    assert llm.parse_calls == 2
+
+
+def test_openai_conflicting_identity_sources_fail_before_agent(tmp_path, catalog):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json=openai_payload(context={"user_id": 4}),
+        )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "identity_conflict"
+    assert llm.parse_calls == 0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        openai_payload(user=None),
+        openai_payload(
+            messages=[
+                {"role": "user", "content": "第一轮"},
+                {"role": "user", "content": "第二轮"},
+            ]
+        ),
+        openai_payload(stream=True, stream_options={"include_usage": True}),
+        openai_payload(model="unknown-model"),
+        openai_payload(temperature=0.3),
+    ],
+)
+def test_openai_unsupported_request_subset_has_error_envelope(tmp_path, catalog, payload):
+    with client_for(tmp_path, catalog, ScriptedLLM()) as client:
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 422
+    assert set(response.json()) == {"error"}
+    assert response.json()["error"]["type"] == "invalid_request_error"
+
+
+def test_openai_provider_error_happens_before_sse_headers(tmp_path, catalog):
+    llm = ScriptedLLM()
+    llm.parse_error = LLMUnavailable("timeout")
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post(
+            "/v1/chat/completions", json=openai_payload(stream=True)
+        )
+    assert response.status_code == 503
+    assert not response.headers["content-type"].startswith("text/event-stream")
+    assert response.json()["error"]["code"] == "llm_unavailable"
+
+
+def test_openai_original_profile_block_has_specific_permission_error(tmp_path, catalog):
+    llm = ScriptedLLM()
+    llm.parse_error = LLMUnavailable("original_profile_blocked")
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", json=openai_payload())
+    assert response.status_code == 403
+    assert response.json()["error"]["type"] == "permission_error"
+    assert response.json()["error"]["code"] == "original_profile_blocked"
+
+
+def test_openai_client_request_id_replays_business_result(tmp_path, catalog):
+    llm = ScriptedLLM()
+    headers = {"X-Client-Request-Id": "openai-retry-1"}
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", headers=headers, json=openai_payload())
+        second = client.post("/v1/chat/completions", headers=headers, json=openai_payload())
+    assert first.status_code == second.status_code == 200
+    assert first.headers["x-session-id"] == second.headers["x-session-id"]
+    assert first.json()["choices"][0]["message"] == second.json()["choices"][0]["message"]
+    assert llm.parse_calls == 1

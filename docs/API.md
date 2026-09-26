@@ -2,7 +2,7 @@
 
 默认服务仅加载 3 个手写合成画像与原始菜谱 CSV。原始健康档案和原始对话只用于本地验收；DeepSeek 适配器在发出请求前拒绝 `data_scope=original` 的画像。没有从 HTTP 传入或覆盖 data_scope 的接口。
 
-用户界面为 `http://localhost:8080`，演示页为 `/demo`；前端请求 `/api/` 前缀，由 Nginx 转发到以下原有 API。原 `/health`、`/chat`、`/demo/profiles`、`/docs` 兼容入口继续可用。响应 schema_version 仍为 2.0。
+用户界面为 `http://localhost:8080`，演示页为 `/demo`；前端请求 `/api/` 前缀，由 Nginx 转发到以下原有 API。原 `/health`、`/chat`、`/demo/profiles`、`/docs` 兼容入口继续可用。评测方可调用 OpenAI Chat Completions 兼容入口 `/v1/chat/completions`。内部 `/chat` 响应 schema_version 仍为 2.0。
 
 单独调试后端（不包含前端）的启动命令：
 
@@ -10,7 +10,7 @@
 .\.venv\Scripts\python.exe -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试对应 `http://localhost:8000/docs`。本版本无鉴权，限本机 Demo、单 worker；`POST /chat` 返回完整 JSON，不是 SSE。
+Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试对应 `http://localhost:8000/docs`。本版本无鉴权，限本机 Demo、单 worker；正式公网部署必须在反向代理或 API 网关增加 HTTPS、鉴权、限流及访问日志。`POST /chat` 返回完整业务 JSON；`POST /v1/chat/completions` 可返回完整文本或 SSE。
 
 ## GET /health
 
@@ -25,6 +25,81 @@ Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试
 - 900003：降压及暂未支持的护心目标，用于说明能力边界。
 
 所有信息都是手写的演示资料，不对应真实个人。
+
+## POST /v1/chat/completions
+
+此入口实现 OpenAI Chat Completions 的文本子集，供通用 SDK、评测脚本和流式客户端接入。它复用 `/chat` 的同一套档案、会话、检索、规划和硬约束校验，但只把最终 `reason` 作为 assistant 文本输出。菜单仍由后端结构化结果生成；接口不会把未经约束校验的模型 token 直接转发给客户端。
+
+当前模型名固定为 `fangtai-meal-agent`。每个请求只接受一条 `role=user` 的纯文本消息，表示“当前新增的一轮”；多轮上下文由服务端会话保存，客户端应复用返回的 `X-Session-ID`，而不是重复上传全部历史。示例：
+
+```json
+{
+  "model": "fangtai-meal-agent",
+  "messages": [
+    {"role": "user", "content": "2人晚餐，没有其他忌口，安排三道菜。"}
+  ],
+  "user": "900001",
+  "stream": true,
+  "request_id": "judge-case-01-turn-01"
+}
+```
+
+| 请求字段 | 约束 |
+| --- | --- |
+| model | 必须为 `fangtai-meal-agent` |
+| messages | 恰好一条 user 纯文本消息；内容去除首尾空白后为 1—2000 字符 |
+| user | 用户ID字符串，例如 `"900001"`；也可改用 `context.user_id` 或 `X-User-ID` |
+| stream | 默认 false；true 时响应为 `text/event-stream` |
+| stream_options | 仅接受 `{"include_usage": false}`，且只可与 stream=true 同用 |
+| session_id | 可选；也可改用 `context.session_id` 或 `X-Session-ID` |
+| request_id | 可选幂等键；也可改用 `context.client_turn_id` 或 `X-Client-Request-Id` |
+| context | 方太扩展对象，可含 user_id、session_id、client_turn_id |
+
+同一个含义若从正文和请求头重复提供，值必须完全一致，否则返回 409 `identity_conflict`。用户ID必填；session_id 首轮省略，后续必须复用。每次成功响应都带 `X-Session-ID` 和仅用于链路追踪的 `X-Request-ID`。幂等重试应保留原来的业务 request_id；`X-Request-ID` 每个 HTTP 响应都会重新生成，不能用作业务幂等键。
+
+### 非流式响应
+
+stream=false 时返回标准 Chat Completion 文本子集：
+
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "created": 1789999999,
+  "model": "fangtai-meal-agent",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "..."},
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+### SSE 流式响应
+
+stream=true 时，每条事件使用 `data: <JSON>\n\n`。首块声明 assistant 角色，正文位于后续 `choices[0].delta.content`；最后一个 JSON 块的 `finish_reason` 为 `stop`，随后发送 `data: [DONE]`。同一响应的所有块共用 id、created 和 model。Nginx 对 `/v1/` 关闭缓冲，避免代理聚合 SSE 分块。
+
+服务端会先完成需求解析、菜谱检索、套餐规划和硬约束校验，再开始 SSE。这样可以避免已经向客户端发出 200 后才发现过敏冲突或模型错误；代价是首 Token 时间包含上述安全处理耗时。当前没有可信 token 计量，因此拒绝 `stream_options.include_usage=true`，不会伪造 usage 数值。
+
+### 兼容范围与错误
+
+当前不接受 system/assistant 历史消息、图片、音频、tool_calls、n、temperature 等生成参数，也不支持客户端一次提交完整历史。多条 messages 或未知字段会返回 422，而不会被静默忽略。错误统一使用：
+
+```json
+{
+  "error": {
+    "message": "可安全展示的错误信息",
+    "type": "invalid_request_error",
+    "param": "messages",
+    "code": "invalid_request"
+  }
+}
+```
+
+业务状态映射为 403 原始档案禁止外发、404 用户/会话不存在、409 会话或身份冲突、422 请求不支持、429 容量已满、502 模型输出不可验证、503 模型服务不可用。所有规划错误都在 SSE 响应头发出之前处理。
 
 ## POST /chat
 
@@ -69,6 +144,16 @@ Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试
 
 继续使用同一 session_id，依次回答“2个人，晚餐。”“没有其他忌口，不吃辣椒，安排三道菜。”即可。确认字段记录于 conversation_state.confirmed_fields，待答字段记录于 pending_fields。模糊回答不能把默认值变成已确认；明确无其他忌口也不会撤销已知过敏。未知过敏词位于 pending_allergy_terms，必须澄清后才继续。
 
+### 多人共享菜单
+
+多人场景通过自然语言提供成员、称呼、是否参加以及归属于该人的过敏、忌口和偏好。例如：“我和爸妈三个人晚餐，我爸花生过敏，我妈不吃辣，没有其他忌口。”系统为成员保存稳定 `diner_id` 和别名；后续“爸爸今晚不参加”只改变本餐出席状态，原有个人事实仍保留。
+
+当前规划的是一桌共享菜。任何参餐者的已知过敏、排除食材和不辣要求都会合并到 `conversation_state.constraints`，供检索、规划和最终校验使用，不能用“该成员不吃这道菜”绕过。`meal_constraints` 保存未归属到某个人的整桌约束，`diners` 保存逐人成员状态。退出本餐的成员不再贡献本轮聚合约束；重新参加时其原事实重新生效。
+
+当用户没有明确菜数时，工程默认值为：1—2 人 3 道且无汤，3—4 人 4 道含 1 汤，5—6 人 5 道含 1 汤，7—8 人 6 道含 1 汤。用户明确总菜数或汤数后，后续人数变化不覆盖该结构。已确认总人数小于实名参餐者数量、称呼映射不唯一、或个人过敏词无法可靠映射时，接口返回 `clarification_required`，不会执行检索和规划。
+
+成功响应新增 `diner_suitability`。每位当前参餐者分别返回已知约束、硬约束是否满足、违反项、未覆盖的软偏好及范围说明。该字段只对已提供事实做核对，不推断未提供的疾病、营养数值或健康结论；未实名的其余人数会在 `warnings` 和 `constraints` 中说明信息仍未知。
+
 ### 完整响应结构
 
 | 字段 | 用途 |
@@ -79,6 +164,7 @@ Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试
 | reason | 程序核验事实组成的解释，模型仅选择事实 ID |
 | constraints | 已确认约束及尚待确认信息的中文说明 |
 | conversation_state | 会话 ID、版本、确认字段、约束、菜单有效性、rejected_recipe_ids 及有限历史 |
+| diner_suitability | 当前参餐者逐人已知约束核验；不把未知信息写成已满足 |
 | clarification_questions | field、prompt、options，可直接用于前端提问 |
 | nutrition_analysis | 整餐定性组成、目标匹配、食材贡献与风险；无菜单时 null |
 | replacement_suggestions | 适用于指定槽位的库内候选，不自动应用 |
