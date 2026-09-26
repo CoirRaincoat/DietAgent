@@ -540,6 +540,10 @@ def test_openai_sse_chunks_reconstruct_verified_answer(tmp_path, catalog):
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.headers["cache-control"] == "no-cache"
     assert response.headers["x-accel-buffering"] == "no"
+    timing = response.headers["server-timing"]
+    assert "agent_total;dur=" in timing
+    assert "agent_parse;dur=" in timing
+    assert "ttft" not in timing
     chunks = parse_sse(body)
     assert len({chunk["id"] for chunk in chunks}) == 1
     assert len({chunk["created"] for chunk in chunks}) == 1

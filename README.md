@@ -120,9 +120,11 @@ Remove-Item Env:E2E_LIVE
 ```powershell
 .\.venv\Scripts\python.exe -m evaluation.demo_http --base-url http://localhost:8080
 .\.venv\Scripts\python.exe -m evaluation.smoke_synthetic
+.\.venv\Scripts\python.exe -m evaluation.stream_performance --base-url http://localhost:8080
+.\.venv\Scripts\python.exe -m evaluation.regression_suite --base-url http://localhost:8080
 ```
 
-真实数据验收使用本地人工 Intent fixture，验证工程规则与多轮状态，不等于模型理解准确率。原始资料外部回放 `evaluation.replay` 不属于当前允许执行范围。
+`evaluation.regression_suite` 使用公开、版本化的 10 组合成场景，每次生成 JSON、Markdown 和逐轮 JSONL 报告；默认同时测量其中声明的 SSE 性能子集。报告为内部诊断，不是官方评分。完整 Docker 命令、报告字段和数据集升级规则见 [合成回归文档](docs/REGRESSION.md)。真实数据验收使用本地人工 Intent fixture，验证工程规则与多轮状态，不等于模型理解准确率。原始资料外部回放 `evaluation.replay` 不属于当前允许执行范围。
 
 ## 结构与能力边界
 
@@ -141,6 +143,6 @@ Remove-Item Env:E2E_LIVE
 
 真实健康档案与原始对话未改动、不公开上传；`.env`、`.venv/`、node_modules/、runtime/、artifacts/、构建及浏览器测试产物均被忽略。
 
-查看 [v0.3.0 交付报告](docs/DEMO_V030_REPORT.md)、[前端架构](docs/FRONTEND_ARCHITECTURE.md)、[演示流程](docs/DEMO_FLOW.md)、[API](docs/API.md)、[真实数据报告](evaluation/REAL_DATA_REPORT.md) 和 [开发日志](docs/DEVELOPMENT_LOG.md)。后续 Phase 11 聚焦模型理解能力评测与比赛材料整理。
+查看 [v0.3.0 交付报告](docs/DEMO_V030_REPORT.md)、[前端架构](docs/FRONTEND_ARCHITECTURE.md)、[演示流程](docs/DEMO_FLOW.md)、[API](docs/API.md)、[合成回归](docs/REGRESSION.md)、[流式性能验收](docs/PERFORMANCE.md)、[真实数据报告](evaluation/REAL_DATA_REPORT.md) 和 [开发日志](docs/DEVELOPMENT_LOG.md)。后续 Phase 11 聚焦模型理解能力评测与比赛材料整理。
 
 公开发布使用独立干净快照，排除私有数据与含私有数据的历史，见 [公开发布说明](docs/PUBLICATION.md)。

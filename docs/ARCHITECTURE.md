@@ -70,7 +70,7 @@ DeepSeek 通过 JSON 模式提取 `Intent`，响应须通过 JSON 格式、重�
 
 解释阶段输入程序构造的事实字典，模型只能选择并排序已存在事实 ID。程序最终渲染事实文本，并补上菜谱来源、约束及定性营养边界，模型不自由编写菜名、配料、营养数值或健康效果。解释调用失败时回退到同一份已验证事实；意图解析失败则返回 502 或 503，不伪装成成功规划。
 
-`POST /v1/chat/completions` 支持 OpenAI 兼容的完整 JSON 与 SSE 输出；`POST /chat` 保留完整业务 JSON。当前尚未记录业务 API 的首 Token 时间。`timings_ms` 记录本轮解析、检索规则规划、解释及总耗时，排队时间不计入这些内部计时。
+`POST /v1/chat/completions` 支持 OpenAI 兼容的完整 JSON 与 SSE 输出；`POST /chat` 保留完整业务 JSON。`evaluation.stream_performance` 从客户端请求开始、首个非空正文块和 `[DONE]` 三个边界测量 TTFT 与完整耗时，并支持独立会话并发。服务端 `Server-Timing` 和 `timings_ms` 记录解析、检索规则规划、解释及总耗时，用于诊断但不冒充客户端 TTFT；排队和公网网络时间只反映在客户端观测中。
 
 ## 会话与请求一致性
 
@@ -86,6 +86,8 @@ SQLite 默认位于 `runtime/sessions.sqlite3`。会话包括用户、版本号�
 
 - `python -m evaluation.offline`：用人工标注的结构化 Intent 驱动原始 20 个场景的本地业务流程，以配置中明确的测试餐次上下文验证约束与规划，不评价真实模型 NLU；`--unprepared` 不预置上下文。真实数据验收使用不预置模式。
 - `python -m evaluation.smoke_synthetic`：用自造用户 900001 与自造对话，通过真实 DeepSeek 和 ASGI 接口联调，不向模型发送原始健康档案。
+- `python -m evaluation.stream_performance --base-url http://localhost:8080`：以 OpenAI SSE 客户端边界测量单轮/多轮 TTFT、完整耗时和并发成功率，输出平均值及 P50/P95。
+- `python -m evaluation.regression_suite --base-url http://localhost:8080`：运行版本化公开合成集；结构化功能断言与声明的 SSE 性能子集写入同一时间戳报告目录，并记录数据集 SHA-256 与代码提交。
 - `python -m evaluation.replay --base-url http://localhost:8080`：使用 HTTP 服务和原始场景的真实回放，会发送上文列明字段，按用户已确认的仅使用合成资料范围，不执行该入口。
 
 实际运行结果由开发日志记录。离线通过、自造场景联调通过和原始数据外部回放完成是不同证据，不能相互替代。

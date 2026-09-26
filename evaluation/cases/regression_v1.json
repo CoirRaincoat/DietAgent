@@ -1,0 +1,246 @@
+{
+  "schema_version": "1.0",
+  "dataset_version": "synthetic-regression-v1",
+  "data_scope": "synthetic",
+  "description": "公开、手工编写的合成回归集；不包含正式验收对话或真实健康档案。",
+  "cases": [
+    {
+      "case_id": "basic_single_complete",
+      "rubric": "basic",
+      "user_id": 900001,
+      "tags": ["基础推荐", "菜谱真实性", "单轮"],
+      "measure_performance": true,
+      "turns": [
+        {
+          "message": "1人吃晚餐，没有其他忌口，安排3道菜，不要汤。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "constraints": {"people": 1, "meal_type": "晚餐", "dish_count": 3, "soup_count": 0},
+            "recipe_traceability": true,
+            "unique_recipe_ids": true,
+            "nutrition_alignment": true,
+            "hard_constraints_satisfied": true,
+            "menu_valid": true,
+            "required_tools": ["recipe_search", "health_check", "nutrition_analysis"]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "basic_profile_allergies",
+      "rubric": "basic",
+      "user_id": 900002,
+      "tags": ["过敏零违反", "画像约束", "不吃辣"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "1人晚餐，沿用我档案里的过敏和健康要求，没有其他忌口，另外不吃辣，安排3道菜。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "constraints": {"people": 1, "meal_type": "晚餐", "dish_count": 3, "no_spicy": true},
+            "recipe_traceability": true,
+            "unique_recipe_ids": true,
+            "nutrition_alignment": true,
+            "hard_constraints_satisfied": true,
+            "menu_valid": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "complex_multi_person_constraints",
+      "rubric": "complex",
+      "user_id": 900001,
+      "tags": ["多人", "分别归因", "多硬约束"],
+      "measure_performance": true,
+      "turns": [
+        {
+          "message": "我们3个人吃晚餐：我对海鲜过敏，小王不吃花生，小李不吃辣。没有其他忌口，安排4道菜，不要汤。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 4,
+            "constraints": {"people": 3, "meal_type": "晚餐", "dish_count": 4, "soup_count": 0},
+            "diner_count": 3,
+            "recipe_traceability": true,
+            "unique_recipe_ids": true,
+            "nutrition_alignment": true,
+            "hard_constraints_satisfied": true,
+            "menu_valid": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "complex_menu_structure",
+      "rubric": "complex",
+      "user_id": 900003,
+      "tags": ["宴请", "套餐结构", "搭配多样性"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "4人晚餐，没有其他忌口，安排5道菜，其中1道汤，注意荤素、冷热和做法多样。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 5,
+            "constraints": {"people": 4, "meal_type": "晚餐", "dish_count": 5, "soup_count": 1},
+            "recipe_traceability": true,
+            "unique_recipe_ids": true,
+            "nutrition_alignment": true,
+            "hard_constraints_satisfied": true,
+            "menu_valid": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "interaction_clarify_then_plan",
+      "rubric": "interaction",
+      "user_id": 900001,
+      "tags": ["主动澄清", "多轮", "上下文"],
+      "measure_performance": true,
+      "turns": [
+        {
+          "message": "帮我安排一餐。",
+          "expect": {
+            "status": "clarification_required",
+            "clarification_fields": ["meal_type", "people", "restrictions"],
+            "no_planning": true
+          }
+        },
+        {
+          "message": "2个人吃晚餐，没有其他忌口，安排3道菜，不要汤。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "constraints": {"people": 2, "meal_type": "晚餐", "dish_count": 3, "soup_count": 0},
+            "recipe_traceability": true,
+            "nutrition_alignment": true,
+            "hard_constraints_satisfied": true,
+            "menu_valid": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "interaction_local_replacement",
+      "rubric": "interaction",
+      "user_id": 900001,
+      "tags": ["局部替换", "最小修改"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "2个人吃晚餐，没有其他忌口，安排3道菜，不要汤。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "recipe_traceability": true,
+            "hard_constraints_satisfied": true
+          }
+        },
+        {
+          "message": "只换第二道菜，其他两道保持不变。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "menu_relation": "only_slots_changed",
+            "changed_slots": [2],
+            "recipe_traceability": true,
+            "hard_constraints_satisfied": true,
+            "required_tools": ["menu_modify"]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "interaction_constraint_append",
+      "rubric": "interaction",
+      "user_id": 900001,
+      "tags": ["约束追加", "上下文一致性"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "2个人吃晚餐，没有其他忌口，安排3道菜，不要汤。",
+          "expect": {"status": "ok", "menu_count": 3, "recipe_traceability": true}
+        },
+        {
+          "message": "再加一个要求：不吃辣，人数、餐次和菜数都不变。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "constraints": {"people": 2, "meal_type": "晚餐", "dish_count": 3, "no_spicy": true},
+            "recipe_traceability": true,
+            "hard_constraints_satisfied": true,
+            "menu_valid": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "interaction_reject_whole_menu",
+      "rubric": "interaction",
+      "user_id": 900001,
+      "tags": ["方案否定", "拒绝记忆"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "1人晚餐，没有其他忌口，安排3道菜，不要汤。",
+          "expect": {"status": "ok", "menu_count": 3, "recipe_traceability": true}
+        },
+        {
+          "message": "这份菜单全部不要，按原来的要求重新安排。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "menu_relation": "disjoint",
+            "rejected_previous_absent": true,
+            "recipe_traceability": true,
+            "hard_constraints_satisfied": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "interaction_context_explanation",
+      "rubric": "interaction",
+      "user_id": 900001,
+      "tags": ["上下文回溯", "解释", "不修改菜单"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "2人晚餐，没有其他忌口，安排3道菜，不要汤。",
+          "expect": {"status": "ok", "menu_count": 3, "recipe_traceability": true}
+        },
+        {
+          "message": "解释一下为什么这样搭配，不要调整任何菜。",
+          "expect": {
+            "status": "ok",
+            "menu_count": 3,
+            "menu_relation": "unchanged",
+            "recipe_traceability": true,
+            "forbidden_tools": ["recipe_search", "menu_modify"],
+            "required_tools": ["health_check"]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "interaction_vague_request",
+      "rubric": "interaction",
+      "user_id": 900001,
+      "tags": ["模糊追问", "主动确认"],
+      "measure_performance": false,
+      "turns": [
+        {
+          "message": "给我弄点合适的吃的。",
+          "expect": {
+            "status": "clarification_required",
+            "clarification_fields": ["meal_type", "people", "restrictions"],
+            "no_planning": true
+          }
+        }
+      ]
+    }
+  ]
+}

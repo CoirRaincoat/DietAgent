@@ -1,6 +1,7 @@
 """OpenAI Chat Completions compatibility contracts and wire rendering."""
 
 import json
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from time import time
@@ -158,6 +159,23 @@ def resolve_agent_request(
 def completion_identity() -> tuple[str, int, str]:
     """Create stable values shared by every chunk in one HTTP response."""
     return f"chatcmpl-{uuid4().hex}", int(time()), f"req_{uuid4().hex}"
+
+
+def server_timing(result: ChatResult) -> str:
+    """Expose allow-listed internal phases for diagnosis, never a claimed TTFT."""
+    names = (
+        ("total", "agent_total"),
+        ("parse", "agent_parse"),
+        ("retrieval_rules_planning", "planning"),
+        ("explanation", "explanation"),
+    )
+    metrics = []
+    for source, public in names:
+        duration = result.timings_ms.get(source)
+        if duration is None or not math.isfinite(duration) or duration < 0:
+            continue
+        metrics.append(f"{public};dur={duration:.2f}")
+    return ", ".join(metrics)
 
 
 def completion_body(result: ChatResult, completion_id: str, created: int) -> dict:
