@@ -57,6 +57,8 @@ Compose部署的接口文档：`http://localhost:8080/docs`；单独后端调试
 
 同一个含义若从正文和请求头重复提供，值必须完全一致，否则返回 409 `identity_conflict`。用户ID必填；session_id 首轮省略，后续必须复用。每次成功响应都带 `X-Session-ID` 和仅用于链路追踪的 `X-Request-ID`。幂等重试应保留原来的业务 request_id；`X-Request-ID` 每个 HTTP 响应都会重新生成，不能用作业务幂等键。
 
+成功响应还可带标准 `Server-Timing`，其中 `agent_total`、`agent_parse`、`planning` 和 `explanation` 是服务端内部阶段耗时（毫秒）。该响应头用于定位性能瓶颈，不包含 TTFT，也不能代替客户端从发出请求到收到第一个非空正文块的实际测量。
+
 ### 非流式响应
 
 stream=false 时返回标准 Chat Completion 文本子集：
@@ -230,6 +232,8 @@ menu 和 replacement_suggestions 中每项包含：
 意图解析失败不生成菜单；解释失败可回退到同一份已验证事实。营养只作定性解释，不判断治疗效果或个人摄入达标。菜谱缺少可靠总耗时，明确时间上限会要求澄清。
 
 ## 真实数据验收与回归
+
+`python -m evaluation.regression_suite --base-url http://localhost:8080`：执行公开的版本化合成回归集，对 `/chat` 的菜谱来源、硬约束、多人适配和多轮最小修改做结构化断言，并通过 SSE 重放性能子集。每次输出 JSON、Markdown 和 JSONL 报告；内部诊断分不是官方评分，详见 [REGRESSION.md](REGRESSION.md)。
 
 `python -m evaluation.real_data`：全部真实档案及原始对话在本地验收，生成 evaluation/REAL_DATA_REPORT.md。`python -m evaluation.offline --unprepared`：原始对话不预置用餐信息，验证缺字段澄清。`python -m evaluation.offline`：显式配置测试用餐上下文，保留对规划下游的回归覆盖；上下文不是原始用户输入。以上均不调用外部模型，也不评价真实模型 NLU。
 

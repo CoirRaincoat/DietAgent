@@ -17,6 +17,7 @@ from app.api.openai_compat import (
     completion_identity,
     error_body,
     resolve_agent_request,
+    server_timing,
     stream_events,
 )
 from app.domain.models import ChatResult
@@ -235,6 +236,9 @@ def create_app(
             "X-Request-ID": server_request_id,
             "X-Session-ID": result.conversation_state.session_id,
         }
+        timing = server_timing(result)
+        if timing:
+            headers["Server-Timing"] = timing
         if not request.stream:
             return JSONResponse(
                 content=completion_body(result, completion_id, created), headers=headers
