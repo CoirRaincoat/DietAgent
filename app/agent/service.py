@@ -18,6 +18,7 @@ from app.agent.diners import (
     diner_suitability,
     profile_diner,
 )
+from app.agent.menu_balance import analyze_menu_balance, balance_summary
 from app.agent.planner import MenuPlanner, PlanResult
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
 from app.domain.models import (
@@ -476,6 +477,7 @@ class MealAgent:
         nutrition = self.tools.call(
             "nutrition_analysis", events, recipes=chosen, constraints=constraints,
         )
+        menu_balance = analyze_menu_balance(chosen)
         suitability = diner_suitability(chosen, state.diners, self.rules)
         if any(not item.hard_constraints_satisfied for item in suitability):
             raise RuntimeError("Final per-diner validation failed")
@@ -486,6 +488,7 @@ class MealAgent:
         facts = {
             "catalog": "本餐菜品均来自方太菜谱库，可通过 recipe_id 查到具体食材与步骤。",
             "constraints": "已按当前已知过敏、排除食材与明确要求执行规则检查。",
+            "balance": balance_summary(menu_balance),
             "nutrition": "营养说明基于食材和做法作定性分析，未计算热量、蛋白质、糖或钠的精确含量。",
         }
         active_diners = [diner for diner in state.diners if diner.attendance]
@@ -532,7 +535,7 @@ class MealAgent:
             selected = await self.llm.explain(facts)
             if not selected or any(key not in facts for key in selected):
                 raise ValueError("Unknown explanation fact")
-            required_facts = ["catalog", "constraints"]
+            required_facts = ["catalog", "constraints", "balance"]
             if "diners" in facts:
                 required_facts.append("diners")
             selected = list(dict.fromkeys(required_facts + selected + ["nutrition"]))

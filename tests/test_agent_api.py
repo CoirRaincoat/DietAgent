@@ -85,6 +85,11 @@ def test_full_menu_tool_calls_and_replacement_preserves_other_slots(tmp_path, ca
         first = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
         assert first["status"] == "ok"
         assert len(first["menu"]) == 3
+        assert "menu_balance" not in first
+        assert "套餐搭配说明" in first["reason"]
+        assert "蔬菜类菜" in first["reason"]
+        assert "工程评分" not in first["reason"]
+        assert "/100" not in first["reason"]
         assert all(item["recipe_id"] in catalog.recipes for item in first["menu"])
         assert {tool["name"] for tool in first["tool_calls"]} >= {
             "recipe_search", "health_check", "menu_modify", "nutrition_analysis",
