@@ -90,6 +90,14 @@ npm run dev
 
 ## 测试与验收
 
+完整的 Docker 自测、真实模型回归、性能测量、可选私有矩阵和严格评分卡可以通过一条命令运行：
+
+```powershell
+.\scripts\run_self_assessment.ps1
+```
+
+输出写入 `runtime/self_assessments/`；评分门禁、私有数据参数和报告解释见[一体化自测文档](docs/SELF_ASSESSMENT.md)。
+
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m ruff check app pipelines evaluation tests
