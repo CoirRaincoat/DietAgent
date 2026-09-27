@@ -129,7 +129,9 @@ def test_preparation_cooling_does_not_claim_cold_food_balance(
 
     assert result.temperature_counts == {"hot": 4, "cold": 0, "unknown": 0}
     assert any("未识别到有明确冷食证据" in gap for gap in result.gaps)
-    assert "冷食 0 道" in balance_summary(result)
+    summary = balance_summary(result)
+    assert "冷食 0 道" not in summary
+    assert "未知" not in summary
 
 
 @pytest.mark.parametrize(

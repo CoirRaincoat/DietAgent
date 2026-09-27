@@ -407,7 +407,7 @@ def test_multi_diner_shared_constraints_and_attendance_changes(tmp_path, catalog
     assert first["conversation_state"]["constraints"]["no_spicy"] is True
     assert len(first["diner_suitability"]) == 3
     assert all(item["hard_constraints_satisfied"] for item in first["diner_suitability"])
-    assert "逐人适配" in first["reason"]
+    assert "多人要求方面" in first["reason"]
     assert not any(
         "花生" in ingredient
         for item in first["menu"]
@@ -675,8 +675,10 @@ def test_openai_renders_every_verified_dish_with_minimal_selected_facts(tmp_path
         )
     else:
         content = response.json()["choices"][0]["message"]["content"]
+    assert "只将第 2 道" in expected["reason"]
+    assert "其他菜保持不变" in expected["reason"]
+    assert "未计算蛋白质" not in expected["reason"]
     for dish in expected["menu"]:
-        assert dish["name"] not in expected["reason"]
         assert f'{dish["slot"]}. {dish["name"]}' in content
         assert dish["recipe_id"] in content
     assert content.endswith(expected["reason"])
