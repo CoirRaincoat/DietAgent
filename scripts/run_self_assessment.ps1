@@ -54,7 +54,7 @@ function Find-PrivateJsonFile {
     $candidates = @()
     foreach ($file in Get-ChildItem -LiteralPath $Directory -Filter "*.json" -File) {
         try {
-            $value = @(Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json)
+            $value = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
         }
         catch {
             continue
