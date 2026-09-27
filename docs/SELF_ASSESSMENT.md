@@ -35,6 +35,13 @@
 .\scripts\run_self_assessment.ps1
 ```
 
+脚本默认读取当前工作树中被 Git 忽略的 `.env`。如果模型配置保存在另一份工作树，显式传入该文件；其中允许的模型配置会覆盖当前 PowerShell 中可能过期的同名变量，值不会输出：
+
+```powershell
+.\scripts\run_self_assessment.ps1 `
+  -SettingsFile "D:\Projects\DietAgent\.env"
+```
+
 默认流程依次执行：
 
 1. 检查 Docker Engine；
@@ -48,14 +55,21 @@
 
 ```powershell
 .\scripts\run_self_assessment.ps1 `
+  -SettingsFile "D:\Projects\DietAgent\.env" `
   -PrivateDataDir "C:\Users\jack\OneDrive\桌面\数据支持方太"
 ```
 
-私有目录默认需要以下文件，可用参数覆盖文件名：
+私有目录需要两个 JSON 文件和菜谱 CSV。脚本按结构自动识别 20 项对话文件；存在完整与脱敏两份 50 项档案时，默认选取内容更丰富、文件更大的档案。菜谱默认文件名为 `recipes_sample_2000.csv`。也可以显式覆盖：
 
-- `50个用户健康档案_详细版7.13.json`
-- `对话用例.json`
-- `recipes_sample_2000.csv`
+```powershell
+.\scripts\run_self_assessment.ps1 `
+  -PrivateDataDir "C:\path\to\authorized-data" `
+  -ProfilesFile "profile-file.json" `
+  -DialoguesFile "dialogue-file.json" `
+  -RecipesFile "recipes_sample_2000.csv"
+```
+
+宿主脚本本身保持纯 ASCII，兼容默认按系统代码页读取脚本的 Windows PowerShell 5；中文文件名来自目录扫描或命令行参数，不再硬编码在 `.ps1` 中。
 
 常用调试参数：
 
