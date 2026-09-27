@@ -37,6 +37,7 @@ def _result(ids: list[str]) -> dict:
     menu = [_dish(recipe_id) | {"slot": index} for index, recipe_id in enumerate(ids, 1)]
     return {
         "status": "ok",
+        "reason": "已按要求安排菜单，搭配上包含蔬菜类菜和蛋白质来源菜。",
         "menu": menu,
         "replacement_suggestions": [],
         "clarification_questions": [],
@@ -106,6 +107,7 @@ def test_loader_rejects_non_synthetic_profile_ids(tmp_path) -> None:
 
 def test_turn_checks_traceability_hard_constraints_and_minimal_change() -> None:
     result = _result(["keep-1", "new-2", "keep-3"])
+    result["reason"] = "已按要求只调整第 2 道，其他菜保持不变。"
     outcomes = evaluate_turn(
         result,
         {
@@ -126,6 +128,20 @@ def test_turn_checks_traceability_hard_constraints_and_minimal_change() -> None:
 
     assert outcomes
     assert all(outcome["passed"] for outcome in outcomes)
+
+
+def test_turn_checks_expose_user_copy_regressions() -> None:
+    result = _result(["r1", "r2", "r3"])
+    result["reason"] = (
+        "套餐搭配说明：可通过 recipe_id 查看。"
+        "未计算蛋白质含量，未计算蛋白质含量。"
+    )
+
+    outcomes = evaluate_turn(result, {"status": "ok"}, previous_menu_ids=None)
+    by_name = {outcome["check"]: outcome for outcome in outcomes}
+
+    assert by_name["user_copy_has_no_internal_jargon"]["passed"] is False
+    assert by_name["user_copy_has_no_repeated_limitations"]["passed"] is False
 
 
 def test_turn_checks_expose_provenance_and_suitability_failures() -> None:

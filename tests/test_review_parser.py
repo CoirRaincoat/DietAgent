@@ -27,7 +27,7 @@ async def test_attributed_allergy_survives_real_adapter_replace_and_explain(tmp_
     def handler(request):
         payload = json.loads(json.loads(request.content)["messages"][1]["content"])
         answer = (
-            {"reason_ids": ["catalog"]} if "facts" in payload else intents[payload["message"]]
+            {"reason_ids": ["opening"]} if "facts" in payload else intents[payload["message"]]
         )
         return httpx.Response(200, json=completion(answer))
 
@@ -90,7 +90,7 @@ async def test_personal_pending_reference_and_resolution_cross_adapter_and_servi
     def handler(request):
         payload = json.loads(json.loads(request.content)["messages"][1]["content"])
         answer = (
-            {"reason_ids": ["catalog"]} if "facts" in payload else intents[payload["message"]]
+            {"reason_ids": ["opening"]} if "facts" in payload else intents[payload["message"]]
         )
         return httpx.Response(200, json=completion(answer))
 
@@ -134,7 +134,7 @@ async def test_unnamed_personal_allergy_can_be_resolved_by_the_same_person(tmp_p
     def handler(request):
         payload = json.loads(json.loads(request.content)["messages"][1]["content"])
         answer = (
-            {"reason_ids": ["catalog"]} if "facts" in payload else intents[payload["message"]]
+            {"reason_ids": ["opening"]} if "facts" in payload else intents[payload["message"]]
         )
         return httpx.Response(200, json=completion(answer))
 

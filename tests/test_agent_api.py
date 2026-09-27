@@ -86,8 +86,10 @@ def test_full_menu_tool_calls_and_replacement_preserves_other_slots(tmp_path, ca
         assert first["status"] == "ok"
         assert len(first["menu"]) == 3
         assert "menu_balance" not in first
-        assert "套餐搭配说明" in first["reason"]
+        assert "搭配上包含" in first["reason"]
         assert "蔬菜类菜" in first["reason"]
+        assert "recipe_id" not in first["reason"]
+        assert "未计算蛋白质" not in first["reason"]
         assert "工程评分" not in first["reason"]
         assert "/100" not in first["reason"]
         assert all(item["recipe_id"] in catalog.recipes for item in first["menu"])
@@ -100,6 +102,8 @@ def test_full_menu_tool_calls_and_replacement_preserves_other_slots(tmp_path, ca
         assert second["status"] == "ok"
         old, new = [x["recipe_id"] for x in first["menu"]], [x["recipe_id"] for x in second["menu"]]
         assert old[0] == new[0] and old[2] == new[2] and old[1] != new[1]
+        assert "只将第 2 道" in second["reason"]
+        assert "其他菜保持不变" in second["reason"]
         assert second["conversation_state"]["revision"] == 2
 
 
@@ -189,7 +193,8 @@ def test_explanation_failure_uses_verified_facts(tmp_path, catalog):
         result = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
         assert result["status"] == "ok"
         assert result["explanation_source"] == "verified_template"
-        assert "未计算" in result["reason"]
+        assert "搭配上包含" in result["reason"]
+        assert "recipe_id" not in result["reason"]
 
 
 @pytest.mark.parametrize("error,status", [(LLMUnavailable("timeout"), 503), (LLMOutputError(), 502),
@@ -402,7 +407,7 @@ def test_multi_diner_shared_constraints_and_attendance_changes(tmp_path, catalog
     assert first["conversation_state"]["constraints"]["no_spicy"] is True
     assert len(first["diner_suitability"]) == 3
     assert all(item["hard_constraints_satisfied"] for item in first["diner_suitability"])
-    assert "逐人适配" in first["reason"]
+    assert "多人要求方面" in first["reason"]
     assert not any(
         "花生" in ingredient
         for item in first["menu"]
@@ -554,7 +559,8 @@ def test_openai_sse_chunks_reconstruct_verified_answer(tmp_path, catalog):
     content = "".join(
         chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
     )
-    assert "本餐菜品均来自方太菜谱库" in content
+    assert "已根据你确认的人数、餐次和饮食要求安排好这餐" in content
+    assert "可通过 recipe_id" not in content
 
 
 def test_openai_followup_uses_response_session_header(tmp_path, catalog):
@@ -642,12 +648,12 @@ def test_openai_client_request_id_replays_business_result(tmp_path, catalog):
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_openai_renders_every_verified_dish_without_selected_dish_facts(tmp_path, catalog, stream):
-    class CatalogOnlyLLM(ScriptedLLM):
+def test_openai_renders_every_verified_dish_with_minimal_selected_facts(tmp_path, catalog, stream):
+    class OpeningOnlyLLM(ScriptedLLM):
         async def explain(self, facts):
-            return ["catalog"]
+            return ["opening"]
 
-    llm = CatalogOnlyLLM([complete_intent(), Intent(action="replace", replace_slot=2)])
+    llm = OpeningOnlyLLM([complete_intent(), Intent(action="replace", replace_slot=2)])
     with client_for(tmp_path, catalog, llm) as client:
         first = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
         sid = first["conversation_state"]["session_id"]
@@ -669,8 +675,10 @@ def test_openai_renders_every_verified_dish_without_selected_dish_facts(tmp_path
         )
     else:
         content = response.json()["choices"][0]["message"]["content"]
+    assert "只将第 2 道" in expected["reason"]
+    assert "其他菜保持不变" in expected["reason"]
+    assert "未计算蛋白质" not in expected["reason"]
     for dish in expected["menu"]:
-        assert dish["name"] not in expected["reason"]
         assert f'{dish["slot"]}. {dish["name"]}' in content
         assert dish["recipe_id"] in content
     assert content.endswith(expected["reason"])

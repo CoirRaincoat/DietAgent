@@ -33,7 +33,7 @@ from evaluation.stream_performance import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v2.json"
-VALIDATOR_VERSION = "synthetic-validator-v2"
+VALIDATOR_VERSION = "synthetic-validator-v3"
 SYNTHETIC_USER_IDS = {900001, 900002, 900003}
 RUBRIC_WEIGHTS = {"basic": 20.0, "complex": 20.0, "interaction": 30.0}
 PERFORMANCE_METRICS = ("ttft", "single_e2e", "multi_average")
@@ -135,6 +135,62 @@ def _check(name: str, expected: Any, actual: Any, passed: bool) -> dict[str, Any
 
 def _menu_ids(result: dict[str, Any]) -> list[str]:
     return [str(item.get("recipe_id", "")) for item in result.get("menu", [])]
+
+
+def _copy_quality_checks(
+    result: dict[str, Any], expected: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Check deterministic user-copy regressions without subjective scoring."""
+    reason = result.get("reason")
+    text = reason if isinstance(reason, str) else ""
+    forbidden = [
+        marker
+        for marker in (
+            "recipe_id",
+            "套餐搭配说明",
+            "冷热文字证据",
+            "未计算蛋白质含量",
+            "保留原位置上的 0 道菜",
+        )
+        if marker in text
+    ]
+    checks = [
+        _check(
+            "user_copy_present_and_concise",
+            "1-400 Chinese characters",
+            {"length": len(text)},
+            1 <= len(text) <= 400,
+        ),
+        _check(
+            "user_copy_has_no_internal_jargon",
+            [],
+            forbidden,
+            not forbidden,
+        ),
+        _check(
+            "user_copy_has_no_repeated_limitations",
+            "at most one limitation phrase",
+            {"未计算": text.count("未计算"), "未知": text.count("未知")},
+            text.count("未计算") <= 1 and text.count("未知") <= 1,
+        ),
+    ]
+    relation = expected.get("menu_relation")
+    relation_markers = {
+        "only_slots_changed": ("其他菜保持不变",),
+        "disjoint": ("重新安排整份菜单",),
+        "unchanged": ("搭配思路",),
+    }
+    if relation in relation_markers:
+        markers = relation_markers[relation]
+        checks.append(
+            _check(
+                "user_copy_matches_intent",
+                list(markers),
+                text,
+                all(marker in text for marker in markers),
+            )
+        )
+    return checks
 
 
 def _traceability_failures(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -258,6 +314,7 @@ def evaluate_turn(
     state = result.get("conversation_state") or {}
     constraints = state.get("constraints") or {}
     tools = [event.get("name") for event in result.get("tool_calls", [])]
+    outcomes.extend(_copy_quality_checks(result, expected))
 
     if "status" in expected:
         outcomes.append(
