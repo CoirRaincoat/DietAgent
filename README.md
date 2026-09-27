@@ -98,6 +98,8 @@ npm --prefix frontend run build
 
 公开版默认后端测试不需要私有健康档案或模型密钥。`evaluation.real_data`、`evaluation.offline` 等私有验收入口需要另行提供授权原始资料，不能从本快照直接复现。
 
+PR #2–#5 的问题复现、修复范围和验证证据见 [2026-09-27 审查与维修报告](docs/reviews/DietAgent_PR_Review_20260927.md)。
+
 浏览器测试在 frontend/ 执行，默认拦截 HTTP 返回独立手写合成响应，不调用模型：
 
 ```powershell

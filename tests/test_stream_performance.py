@@ -178,11 +178,27 @@ def test_summary_reports_distribution_failures_and_threshold_status() -> None:
         "p95": 2900.0,
         "min": 1000.0,
         "max": 3000.0,
-        "status_by_mean": "qualified",
+        "status_by_mean": "invalid",
+        "successful_only_status_by_mean": "qualified",
     }
     assert summary["e2e_ms"]["mean"] == 7000.0
-    assert summary["e2e_ms"]["status_by_mean"] == "excellent"
+    assert summary["e2e_ms"]["status_by_mean"] == "invalid"
+    assert summary["e2e_ms"]["successful_only_status_by_mean"] == "excellent"
 
     multi = summarize_observations(results[:2], multi_turn=True)
     assert multi["threshold_result_valid"]
     assert multi["e2e_ms"]["status_by_mean"] == "qualified"
+
+
+def test_unexecuted_requests_invalidate_success_only_sample():
+    summary = summarize_observations(
+        [observation(1, 100.0, 200.0)], multi_turn=True, expected_requests=3,
+    )
+    assert summary["scheduled"] == 3
+    assert summary["requests"] == 1
+    assert summary["successful"] == 1
+    assert summary["failed"] == 0
+    assert summary["not_executed"] == 2
+    assert summary["threshold_result_valid"] is False
+    assert summary["e2e_ms"]["status_by_mean"] == "invalid"
+    assert summary["e2e_ms"]["successful_only_status_by_mean"] == "excellent"

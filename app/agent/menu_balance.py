@@ -1,5 +1,6 @@
 """Deterministic whole-menu balance checks over traceable recipe metadata."""
 
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -8,8 +9,22 @@ from typing import Literal
 from app.domain.models import Recipe
 
 CATEGORY_KEYS = ("protein", "vegetable", "staple", "soup")
-COLD_MARKERS = ("凉拌", "冷拌", "冰镇", "冷藏", "放凉", "晾凉")
+COLD_DISH_MARKERS = ("凉拌", "冷拌", "冰镇")
 HOT_METHODS = {"蒸", "煮", "炖", "炒", "烤", "煎", "炸", "焖"}
+_SERVING_TEMPERATURE = re.compile(
+    r"(?P<hot>趁热(?:食用|享用|吃)|热食|热吃)"
+    r"|(?P<cold>冷食|冷吃|凉吃)"
+)
+# Equipment and previously cooked ingredients are not new heating operations.
+_HEATING_ACTION = (
+    r"(?:蒸(?!盘|锅|架|笼|鱼豉油)|煮|炖|炒(?!锅)|烤(?!箱|盘|架)|煎|炸|焖)"
+    r"(?!好的|好了|过的|完的)"
+)
+_TEMPERATURE_ACTION = re.compile(
+    rf"(?P<hot>{_HEATING_ACTION}|开始烹饪)"
+    r"|(?P<cold>凉拌|冷拌|冰镇|冷藏|放凉|晾凉|冷却|过凉水|泡冰水)"
+)
+_SERVING_ACTION = re.compile(r"食用|享用|品尝|开吃|装盘|即可")
 
 
 @dataclass(frozen=True)
@@ -27,11 +42,55 @@ class MenuBalance:
 
 
 def serving_temperature(recipe: Recipe) -> str:
-    """Classify only explicit serving-temperature evidence from recipe text."""
-    text = recipe.name + " " + recipe.steps
-    if any(marker in text for marker in COLD_MARKERS):
+    """Use serving evidence and ordered steps, never unordered method tags alone.
+
+    This remains a text heuristic, not a measurement. A named cold dish can
+    include hot dressing preparation; cooling a filling or refrigerating a
+    marinade does not by itself establish the finished dish's temperature.
+    """
+    steps = recipe.steps
+    if re.search(
+        r"(?:趁热(?:食用|享用)?|热食|热吃)[^。；;\n]{0,16}(?:或|也可)"
+        r"[^。；;\n]{0,16}(?:放凉|晾凉|冷藏|冷食|冷吃)", steps
+    ):
+        return "unknown"
+    serving = list(_SERVING_TEMPERATURE.finditer(steps))
+    if serving:
+        # An explicitly optional serving temperature has no single answer.
+        if len({match.lastgroup for match in serving}) > 1 and re.search(
+            r"均可|都可|也可|或|或者", steps
+        ):
+            return "unknown"
+        final_serving = serving[-1]
+        later_actions = list(_TEMPERATURE_ACTION.finditer(steps, final_serving.end()))
+        if not later_actions:
+            return final_serving.lastgroup or "unknown"
+
+    # The dish name describes the finished dish, unlike a later hot oil/sauce
+    # step. Explicit serving-temperature instructions above take precedence.
+    if any(marker in recipe.name for marker in COLD_DISH_MARKERS):
         return "cold"
-    if HOT_METHODS & set(recipe.methods):
+
+    actions = [
+        match for match in _TEMPERATURE_ACTION.finditer(steps)
+        if match.group() != "开始烹饪" or HOT_METHODS & set(recipe.methods)
+    ]
+    if actions:
+        last = actions[-1]
+        if last.lastgroup == "hot":
+            return "hot"
+        # Letting hot food cool slightly does not establish a cold serving.
+        if re.search(r"(?:稍微|稍稍|稍|略微|略)$", steps[:last.start()]):
+            return "unknown"
+        # Cooling is final-serving evidence only when followed by serving,
+        # rather than an unfinished preparation or storage instruction.
+        tail = steps[last.end():]
+        if _SERVING_ACTION.search(tail) and not re.search(
+            r"备用|保存|储存|腌制|馅料|面团", tail
+        ):
+            return "cold"
+        return "unknown"
+    if re.search(_HEATING_ACTION, recipe.name):
         return "hot"
     return "unknown"
 

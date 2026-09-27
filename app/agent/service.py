@@ -16,16 +16,19 @@ from app.agent.diners import (
     aggregate_constraints,
     apply_diner_updates,
     diner_suitability,
+    find_diner,
     profile_diner,
 )
 from app.agent.menu_balance import analyze_menu_balance, balance_summary
 from app.agent.planner import MenuPlanner, PlanResult
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
+from app.domain.allergy_mentions import requires_allergy_clarification
 from app.domain.models import (
     ChatResult,
     ClarificationQuestion,
     Constraints,
     Diner,
+    DinerUpdate,
     Intent,
     MenuItem,
     Recipe,
@@ -143,24 +146,7 @@ class MealAgent:
         meal_constraints = state.meal_constraints or state.constraints.model_copy(deep=True)
         state.meal_constraints = meal_constraints
         constraints = meal_constraints
-        for update in intent.diner_updates:
-            unresolved_diner = self.rules.unresolved_allergies(
-                Constraints(allergies=update.allergies)
-            )
-            if unresolved_diner:
-                return (
-                    f"{update.diner}的过敏原缺少可靠映射，请明确具体食材："
-                    + "、".join(unresolved_diner)
-                )
         confirm_from_intent(state, intent, message)
-        positive_allergy_text = re.sub(
-            r"(?:没有|没|无)(?:任何|其他|额外)?(?:食物|食材)?过敏(?:史)?|不(?:会)?过敏|非过敏", "", message
-        )
-        attributed_allergies = [
-            allergy for update in intent.diner_updates for allergy in update.allergies
-        ]
-        if "过敏" in positive_allergy_text and not intent.allergies and not attributed_allergies:
-            state.pending_allergy = True
         # Unknown terms are pending questions, not permanent hard constraints.
         # Clarification can resolve them, while already known allergens never disappear.
         old_unknown = self.rules.unresolved_allergies(constraints)
@@ -202,6 +188,8 @@ class MealAgent:
             state.diners = apply_diner_updates(
                 state.diners, intent.diner_updates, session_id=state.session_id
             )
+            self._apply_diner_allergy_clarifications(state, intent, message)
+            self._record_unnamed_allergy_questions(state, intent, message)
         except DinerConflict as error:
             state.constraints = aggregate_constraints(constraints, state.diners)
             return str(error)
@@ -253,6 +241,16 @@ class MealAgent:
         if state.pending_allergy:
             details = "（请逐一明确：" + "、".join(state.pending_allergy_terms) + "）" if state.pending_allergy_terms else ""
             return "尚未明确具体过敏食材，请先补充过敏信息" + details + "；此前菜单暂不作为可用建议。"
+        pending_diners = [
+            diner for diner in state.diners
+            if diner.attendance and (diner.pending_allergy or diner.pending_allergy_terms)
+        ]
+        if pending_diners:
+            return "；".join(
+                f"{diner.display_name}的过敏原缺少可靠映射，请明确具体食材："
+                + ("、".join(diner.pending_allergy_terms) or "尚未说明")
+                for diner in pending_diners
+            ) + "；此前菜单暂不作为可用建议。"
         unresolved = self.rules.unresolved_allergies(state.constraints)
         if unresolved:
             return "当前词典无法确认这些过敏原，请明确具体食材：" + "、".join(unresolved)
@@ -264,6 +262,61 @@ class MealAgent:
         if questions:
             return "规划前还需要确认：" + " ".join(question.prompt for question in questions)
         return None
+
+    def _apply_diner_allergy_clarifications(
+        self, state: SessionState, intent: Intent, message: str
+    ) -> None:
+        """Persist known facts first; resolve uncertainty only for its named owner."""
+        for diner in state.diners:
+            unknown = self.rules.unresolved_allergies(Constraints(allergies=diner.allergies))
+            diner.allergies = [term for term in diner.allergies if term not in unknown]
+            diner.pending_allergy_terms = _merge(diner.pending_allergy_terms, unknown)
+        for update in intent.diner_updates:
+            diner = find_diner(state.diners, update)
+            if diner is None:
+                continue
+            scoped_state = state.model_copy(update={
+                "pending_allergy_terms": list(diner.pending_allergy_terms),
+            })
+            if (
+                diner.pending_allergy
+                and update.allergies
+                and explicit_allergy_resolution(message, scoped_state, update.allergies)
+            ):
+                # A named but unmapped answer transfers the block to pending terms;
+                # it must not leave a second, unanswerable unnamed question behind.
+                diner.pending_allergy = False
+            for pending, replacements in update.allergy_clarifications.items():
+                if (
+                    pending in diner.pending_allergy_terms
+                    and replacements
+                    and not self.rules.unresolved_allergies(Constraints(allergies=replacements))
+                    and explicit_allergy_resolution(message, scoped_state, replacements)
+                ):
+                    diner.pending_allergy_terms.remove(pending)
+                    diner.allergies = _merge(diner.allergies, replacements)
+
+    @staticmethod
+    def _record_unnamed_allergy_questions(
+        state: SessionState, intent: Intent, message: str
+    ) -> None:
+        """Attribute only complete, explicit short assertions; never guess a person."""
+        for clause in re.split(r"[，,。；;！!？?\n]", message):
+            clause = clause.strip()
+            if not requires_allergy_clarification(clause, intent, state):
+                continue
+            match = re.fullmatch(
+                r"(.+?)(?:有(?:食物)?|对(?:某种|某些|一种|不明|未知)(?:食物|食材))?过敏(?:史)?",
+                clause,
+            )
+            diner = (
+                find_diner(state.diners, DinerUpdate(diner=match.group(1)))
+                if match and len(match.group(1)) <= 50 else None
+            )
+            if diner is not None:
+                diner.pending_allergy = True
+            else:
+                state.pending_allergy = True
 
     @staticmethod
     def _apply_party_structure_defaults(constraints: Constraints) -> None:
@@ -336,7 +389,14 @@ class MealAgent:
         questions = []
         if status == "clarification_required":
             questions = missing_questions(state)
-            if state.pending_allergy or self.rules.unresolved_allergies(state.constraints):
+            if (
+                state.pending_allergy
+                or any(
+                    d.attendance and (d.pending_allergy or d.pending_allergy_terms)
+                    for d in state.diners
+                )
+                or self.rules.unresolved_allergies(state.constraints)
+            ):
                 questions = [question for question in questions if question.field != "restrictions"]
                 questions.insert(0, ClarificationQuestion(field="allergy", prompt=reason))
             elif not questions and state.constraints.max_minutes is not None:
