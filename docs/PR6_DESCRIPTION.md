@@ -22,7 +22,9 @@
 ## 推送前命令
 
 ```powershell
-python -m pytest tests/test_private_matrix.py tests/test_regression_suite.py -q --basetemp runtime/pytest-pr6
+New-Item -ItemType Directory -Force runtime | Out-Null
+python -m pytest tests/test_private_matrix.py tests/test_regression_suite.py -q `
+  -p no:cacheprovider --basetemp runtime/pytest-pr6
 ```
 
 运行私有矩阵并查看 `runtime/private_matrix_reports/` 下最新的 `report.md`；如报告有失败，将失败代码作为后续独立 PR 的依据，不修改本 PR 的验收事实。
