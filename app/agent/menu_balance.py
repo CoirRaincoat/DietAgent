@@ -219,27 +219,23 @@ def analyze_menu_balance(recipes: Sequence[Recipe]) -> MenuBalance:
 
 
 def balance_summary(balance: MenuBalance) -> str:
-    """Render traceable facts without exposing the internal rank or self-rating."""
+    """Render a concise user-facing summary without internal scores or unknown counts."""
     categories = balance.category_counts
-    parts = [
-        "套餐搭配说明：识别到"
-        f"蔬菜类菜 {categories.get('vegetable', 0)} 道、"
-        f"蛋白质来源菜 {categories.get('protein', 0)} 道、"
-        f"主食类菜 {categories.get('staple', 0)} 道、"
-        f"汤 {categories.get('soup', 0)} 道"
+    labels = {
+        "vegetable": "蔬菜类菜",
+        "protein": "蛋白质来源菜",
+        "staple": "主食",
+        "soup": "汤",
+    }
+    present = [
+        f"{count} 道{labels[key]}"
+        for key in CATEGORY_KEYS
+        if (count := categories.get(key, 0))
     ]
-    methods = "、".join(balance.method_counts)
+    if not present and not balance.method_counts:
+        return "现有菜谱标签不足，暂时无法完整说明菜品搭配。"
+    category_text = "、".join(present) if present else "现有菜品"
+    methods = "、".join(list(balance.method_counts)[:4])
     if methods:
-        parts.append(f"可识别烹饪方式为{methods}")
-    else:
-        parts.append("未识别到可用的烹饪方式元数据")
-    temperatures = balance.temperature_counts
-    hot = temperatures.get("hot", 0)
-    cold = temperatures.get("cold", 0)
-    unknown = temperatures.get("unknown", 0)
-    parts.append(f"冷热文字证据为热菜 {hot} 道、冷食 {cold} 道、未知 {unknown} 道")
-    parts.append(
-        "以上仅为菜谱文字中的类别、做法和冷热证据，"
-        "不代表营养含量、荤素重量比例或个人摄入达标"
-    )
-    return "。".join(parts)
+        return f"搭配上包含{category_text}，做法有{methods}。"
+    return f"搭配上包含{category_text}。"

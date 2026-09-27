@@ -19,8 +19,9 @@ from app.agent.diners import (
     find_diner,
     profile_diner,
 )
-from app.agent.menu_balance import analyze_menu_balance, balance_summary
+from app.agent.menu_balance import analyze_menu_balance
 from app.agent.planner import MenuPlanner, PlanResult
+from app.agent.response_copy import clarification_copy, required_fact_ids, response_facts
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
 from app.domain.allergy_mentions import requires_allergy_clarification
 from app.domain.models import (
@@ -260,7 +261,7 @@ class MealAgent:
             return intent.clarification or "请补充本餐需要调整的具体要求。"
         questions = missing_questions(state)
         if questions:
-            return "规划前还需要确认：" + " ".join(question.prompt for question in questions)
+            return clarification_copy(questions)
         return None
 
     def _apply_diner_allergy_clarifications(
@@ -545,38 +546,14 @@ class MealAgent:
         state.menu_valid = True
         state.pending_clarification = None
         state.pending_fields = []
-        facts = {
-            "catalog": "本餐菜品均来自方太菜谱库，可通过 recipe_id 查到具体食材与步骤。",
-            "constraints": "已按当前已知过敏、排除食材与明确要求执行规则检查。",
-            "balance": balance_summary(menu_balance),
-            "nutrition": "营养说明基于食材和做法作定性分析，未计算热量、蛋白质、糖或钠的精确含量。",
-        }
-        active_diners = [diner for diner in state.diners if diner.attendance]
-        if len(active_diners) > 1:
-            diner_facts = []
-            for diner in active_diners:
-                hard = []
-                if diner.allergies:
-                    hard.append("过敏=" + "、".join(diner.allergies))
-                if diner.excluded_ingredients:
-                    hard.append("不吃=" + "、".join(diner.excluded_ingredients))
-                if diner.no_spicy:
-                    hard.append("不吃辣")
-                diner_facts.append(
-                    f"{diner.display_name}（{'；'.join(hard) if hard else '未提供个人硬约束'}）"
-                )
-            facts["diners"] = (
-                "逐人适配：" + "、".join(diner_facts)
-                + "的已知硬约束均已按共享菜单核对；未提供信息保持未知。"
-            )
-        if previous_ids:
-            kept = sum(old == new for old, new in zip(previous_ids, chosen_ids))
-            facts["changes"] = (
-                f"与上一版相比，保留原位置上的 {kept} 道菜，其余按本轮要求重新选择。"
-            )
-        for item in menu:
-            if item.nutrition_notes:
-                facts[f"dish_{item.slot}"] = f"{item.name}：{item.nutrition_notes[0]}"
+        facts = response_facts(
+            intent=intent,
+            constraints=constraints,
+            diners=state.diners,
+            previous=current,
+            chosen=chosen,
+            balance=menu_balance,
+        )
         warnings = list(planning.warnings)
         for recipe in chosen:
             warnings.extend(self.health_tool.evaluate(recipe, constraints).warnings)
@@ -595,10 +572,8 @@ class MealAgent:
             selected = await self.llm.explain(facts)
             if not selected or any(key not in facts for key in selected):
                 raise ValueError("Unknown explanation fact")
-            required_facts = ["catalog", "constraints", "balance"]
-            if "diners" in facts:
-                required_facts.append("diners")
-            selected = list(dict.fromkeys(required_facts + selected + ["nutrition"]))
+            required_facts = required_fact_ids(intent, facts)
+            selected = list(dict.fromkeys(required_facts + selected))
             reason = "\n".join(facts[key] for key in selected)
         except (LLMUnavailable, LLMOutputError, ValueError):
             source = "verified_template"

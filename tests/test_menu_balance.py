@@ -61,8 +61,9 @@ def test_balanced_menu_reports_categories_methods_and_temperature_evidence() -> 
     assert "balanced" not in summary
     assert "100" not in summary
     assert "/100" not in summary
-    assert "蔬菜类菜 2 道" in summary
+    assert "2 道蔬菜类菜" in summary
     assert "蒸、炒、拌、煮" in summary
+    assert "未知" not in summary
 
 
 def test_repeated_protein_dishes_expose_balance_gaps_without_nutrition_claims() -> None:
