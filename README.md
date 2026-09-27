@@ -96,7 +96,7 @@ npm run dev
 npm --prefix frontend run build
 ```
 
-公开版默认后端测试不需要私有健康档案或模型密钥。`evaluation.real_data`、`evaluation.offline` 等私有验收入口需要另行提供授权原始资料，不能从本快照直接复现。
+公开版默认后端测试不需要私有健康档案或模型密钥。`evaluation.real_data`、`evaluation.offline`、`evaluation.private_matrix` 等私有验收入口需要另行提供授权原始资料，不能从本快照直接复现。
 
 PR #2–#5 的问题复现、修复范围和验证证据见 [2026-09-27 审查与维修报告](docs/reviews/DietAgent_PR_Review_20260927.md)。
 
@@ -126,7 +126,7 @@ Remove-Item Env:E2E_LIVE
 .\.venv\Scripts\python.exe -m evaluation.regression_suite --base-url http://localhost:8080
 ```
 
-`evaluation.regression_suite` 使用公开、版本化的 10 组合成场景，每次生成 JSON、Markdown 和逐轮 JSONL 报告；默认同时测量其中声明的 SSE 性能子集。报告为内部诊断，不是官方评分。完整 Docker 命令、报告字段和数据集升级规则见 [合成回归文档](docs/REGRESSION.md)。真实数据验收使用本地人工 Intent fixture，验证工程规则与多轮状态，不等于模型理解准确率。原始资料外部回放 `evaluation.replay` 不属于当前允许执行范围。
+`evaluation.regression_suite` 使用公开、版本化的 10 组合成场景，每次生成 JSON、Markdown 和逐轮 JSONL 报告；默认同时测量其中声明的 SSE 性能子集。报告为内部诊断，不是官方评分。完整 Docker 命令、报告字段和数据集升级规则见 [合成回归文档](docs/REGRESSION.md)。[私有矩阵回放](docs/PRIVATE_MATRIX.md) 对本地 50 份档案与 20 组未绑定用户的对话建立独立会话，生成脱敏报告。真实数据验收使用本地人工 Intent fixture，验证工程规则与多轮状态，不等于模型理解准确率。原始资料外部回放 `evaluation.replay` 不属于当前允许执行范围。
 
 ## 结构与能力边界
 

@@ -24,6 +24,7 @@ import httpx
 from app.domain.models import Recipe
 from app.infrastructure.data import RECIPE_PATH
 from app.infrastructure.synthetic import load_synthetic_catalog
+from evaluation.reporting import write_bundle
 from evaluation.stream_performance import (
     StreamObservation,
     measure_stream_turn,
@@ -826,16 +827,14 @@ def write_report_bundle(
     raw_responses: list[dict[str, Any]],
 ) -> dict[str, Path]:
     """Write machine-readable, human-readable and raw synthetic outputs."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    json_path = output_dir / "report.json"
-    markdown_path = output_dir / "report.md"
-    responses_path = output_dir / "responses.jsonl"
-    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    markdown_path.write_text(_render_markdown(report), encoding="utf-8")
-    with responses_path.open("w", encoding="utf-8") as stream:
-        for response in raw_responses:
-            stream.write(json.dumps(response, ensure_ascii=False) + "\n")
-    return {"json": json_path, "markdown": markdown_path, "responses": responses_path}
+    paths = write_bundle(
+        output_dir,
+        report,
+        _render_markdown(report),
+        records=raw_responses,
+        records_name="responses.jsonl",
+    )
+    return {"json": paths["json"], "markdown": paths["markdown"], "responses": paths["records"]}
 
 
 def _validate_base_url(value: str) -> str:
