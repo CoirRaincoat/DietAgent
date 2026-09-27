@@ -33,7 +33,7 @@ THRESHOLDS_MS = {
     "multi_average": (6000.0, 12000.0),
 }
 LatencyMetric = Literal["ttft", "single_e2e", "multi_average"]
-LatencyGrade = Literal["excellent", "qualified", "exceeded", "no_data"]
+LatencyGrade = Literal["excellent", "qualified", "exceeded", "no_data", "invalid"]
 
 
 @dataclass(frozen=True)
@@ -187,12 +187,21 @@ async def measure_stream_turn(
         )
 
 
-def summarize_observations(observations: Sequence[StreamObservation], *, multi_turn: bool) -> dict:
+def summarize_observations(
+    observations: Sequence[StreamObservation], *, multi_turn: bool,
+    expected_requests: int | None = None,
+) -> dict:
     """Summarize only completed observations while keeping failures explicit."""
+    scheduled = len(observations) if expected_requests is None else expected_requests
+    if scheduled < len(observations):
+        raise ValueError("Expected request count cannot be below attempted requests")
     successful = [
         item
         for item in observations
-        if item.completed and item.ttft_ms is not None and item.e2e_ms is not None
+        if item.completed and item.status_code == 200 and not item.error and item.content_chars > 0
+        and item.ttft_ms is not None and item.e2e_ms is not None
+        and math.isfinite(item.ttft_ms) and math.isfinite(item.e2e_ms)
+        and 0 <= item.ttft_ms <= item.e2e_ms
     ]
     ttft = _distribution([item.ttft_ms for item in successful if item.ttft_ms is not None])
     e2e = _distribution([item.e2e_ms for item in successful if item.e2e_ms is not None])
@@ -206,12 +215,19 @@ def summarize_observations(observations: Sequence[StreamObservation], *, multi_t
     else:
         e2e["status_by_mean"] = "no_data"
     total = len(observations)
+    valid = scheduled > 0 and len(successful) == scheduled
+    for distribution in (ttft, e2e):
+        distribution["successful_only_status_by_mean"] = distribution["status_by_mean"]
+        if not valid:
+            distribution["status_by_mean"] = "invalid" if scheduled else "no_data"
     return {
+        "scheduled": scheduled,
+        "not_executed": scheduled - total,
         "requests": total,
         "successful": len(successful),
         "failed": total - len(successful),
         "success_rate": len(successful) / total if total else 0.0,
-        "threshold_result_valid": total > 0 and len(successful) == total,
+        "threshold_result_valid": valid,
         "ttft_ms": ttft,
         "e2e_ms": e2e,
     }
@@ -262,7 +278,9 @@ async def run_benchmark(
         "sessions": sessions,
         "turns_per_session": len(messages),
         "concurrency": concurrency,
-        "summary": summarize_observations(observations, multi_turn=mode == "multi"),
+        "summary": summarize_observations(
+            observations, multi_turn=mode == "multi", expected_requests=sessions * len(messages)
+        ),
         "observations": [asdict(item) for item in observations],
     }
 
@@ -323,7 +341,7 @@ async def async_main(args: argparse.Namespace) -> dict:
             single_message=args.message,
         )
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "measurement": "client_observed_sse",
         "base_url": args.base_url,

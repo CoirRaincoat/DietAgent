@@ -56,3 +56,22 @@ def test_legacy_snapshot_and_completed_request_default_to_empty_rejection_memory
     assert store.get(state.session_id, 3).rejected_recipe_ids == []
     cached = store.replay(state.session_id, "old", "hash", 1)
     assert cached.conversation_state.rejected_recipe_ids == []
+
+
+def test_legacy_completed_request_preserves_stored_menu_structure(tmp_path):
+    path = tmp_path / "sessions.sqlite3"
+    store = SessionStore(path)
+    state = SessionState(session_id="old-party", user_id=3, revision=1)
+    state.constraints.dish_count = 5
+    state.constraints.soup_count = 1
+    result = ChatResult(status="no_feasible_menu", reason="legacy", conversation_state=state)
+    legacy = result.model_dump(exclude={"conversation_state": {"menu_structure_explicit"}})
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO requests VALUES (?, ?, ?, ?, ?)",
+            (state.session_id, "old", "hash", 1, json.dumps(legacy)),
+        )
+    cached = store.replay(state.session_id, "old", "hash", 1)
+    assert cached.conversation_state.menu_structure_explicit is True
+    assert cached.conversation_state.constraints.dish_count == 5
+    assert cached.conversation_state.constraints.soup_count == 1

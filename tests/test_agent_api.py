@@ -639,3 +639,58 @@ def test_openai_client_request_id_replays_business_result(tmp_path, catalog):
     assert first.headers["x-session-id"] == second.headers["x-session-id"]
     assert first.json()["choices"][0]["message"] == second.json()["choices"][0]["message"]
     assert llm.parse_calls == 1
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_renders_every_verified_dish_without_selected_dish_facts(tmp_path, catalog, stream):
+    class CatalogOnlyLLM(ScriptedLLM):
+        async def explain(self, facts):
+            return ["catalog"]
+
+    llm = CatalogOnlyLLM([complete_intent(), Intent(action="replace", replace_slot=2)])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
+        sid = first["conversation_state"]["session_id"]
+        # Replay the same business result through both wire formats, with no new parsing.
+        payload = {
+            "user_id": 3, "session_id": sid, "message": "换第二道菜", "request_id": "menu-render",
+        }
+        expected = client.post("/chat", json=payload).json()
+        response = client.post("/v1/chat/completions", json=openai_payload(
+            stream=stream, session_id=sid, request_id="menu-render",
+            messages=[{"role": "user", "content": "换第二道菜"}],
+        ))
+    assert expected["status"] == "ok"
+    assert response.status_code == 200
+    if stream:
+        content = "".join(
+            chunk["choices"][0]["delta"].get("content", "")
+            for chunk in parse_sse(response.text)
+        )
+    else:
+        content = response.json()["choices"][0]["message"]["content"]
+    for dish in expected["menu"]:
+        assert dish["name"] not in expected["reason"]
+        assert f'{dish["slot"]}. {dish["name"]}' in content
+        assert dish["recipe_id"] in content
+    assert content.endswith(expected["reason"])
+    assert llm.parse_calls == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_clarification_does_not_render_previous_menu(tmp_path, catalog, stream):
+    llm = ScriptedLLM([complete_intent(), Intent(max_minutes=1)])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
+        response = client.post("/v1/chat/completions", json=openai_payload(
+            stream=stream, session_id=first["conversation_state"]["session_id"],
+            messages=[{"role": "user", "content": "要求一分钟内做好"}],
+        ))
+    assert response.status_code == 200
+    content = (
+        "".join(chunk["choices"][0]["delta"].get("content", "")
+                for chunk in parse_sse(response.text))
+        if stream else response.json()["choices"][0]["message"]["content"]
+    )
+    assert "本餐菜单：" not in content
+    assert all(dish["name"] not in content for dish in first["menu"])

@@ -10,8 +10,9 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -20,6 +21,9 @@ from uuid import uuid4
 
 import httpx
 
+from app.domain.models import Recipe
+from app.infrastructure.data import RECIPE_PATH
+from app.infrastructure.synthetic import load_synthetic_catalog
 from evaluation.stream_performance import (
     StreamObservation,
     measure_stream_turn,
@@ -27,7 +31,8 @@ from evaluation.stream_performance import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v1.json"
+DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v2.json"
+VALIDATOR_VERSION = "synthetic-validator-v2"
 SYNTHETIC_USER_IDS = {900001, 900002, 900003}
 RUBRIC_WEIGHTS = {"basic": 20.0, "complex": 20.0, "interaction": 30.0}
 PERFORMANCE_METRICS = ("ttft", "single_e2e", "multi_average")
@@ -69,7 +74,7 @@ class SuiteDefinition:
 def load_suite(path: Path = DEFAULT_SUITE_PATH) -> SuiteDefinition:
     """Load and validate a public synthetic suite without production data."""
     raw = json.loads(path.read_text(encoding="utf-8"))
-    if raw.get("schema_version") != "1.0":
+    if raw.get("schema_version") not in {"1.0", "2.0"}:
         raise ValueError("Unsupported regression suite schema version")
     if raw.get("data_scope") != "synthetic":
         raise ValueError("Regression suite must declare synthetic data scope")
@@ -92,6 +97,16 @@ def load_suite(path: Path = DEFAULT_SUITE_PATH) -> SuiteDefinition:
         )
         if not turns or any(not turn.message for turn in turns):
             raise ValueError(f"Case {case_id} must contain non-empty turns")
+        if raw["schema_version"] == "2.0":
+            for turn in turns:
+                if turn.expect.get("status") == "ok" and (
+                    not turn.expect.get("catalog_traceability")
+                    or "independent_food_rules" not in turn.expect
+                ):
+                    raise ValueError(f"Case {case_id} requires independent recipe checks")
+                for rule in turn.expect.get("independent_food_rules", []):
+                    if not rule.get("label") or not rule.get("forbidden_terms"):
+                        raise ValueError(f"Case {case_id} has an empty food oracle rule")
         cases.append(
             CaseDefinition(
                 case_id=case_id,
@@ -143,13 +158,100 @@ def _traceability_failures(result: dict[str, Any]) -> list[dict[str, Any]]:
     return failures
 
 
+def _comparable(value: Any) -> Any:
+    return sorted(value) if isinstance(value, list) else value
+
+
+def _diner_checks(result: dict[str, Any], expected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compare authored personal facts, including absence, rather than service verdicts."""
+    diners = (result.get("conversation_state") or {}).get("diners", [])
+    checks = []
+    matched_ids = []
+    for person in expected:
+        selector = "profile_owner" if person.get("profile_owner") else "display_name"
+        wanted_identity = person[selector]
+        matches = [diner for diner in diners if diner.get(selector) == wanted_identity]
+        fields = {key: value for key, value in person.items() if key != selector}
+        actual = (
+            {key: matches[0].get(key) for key in fields} if len(matches) == 1 else None
+        )
+        passed = actual is not None and all(
+            _comparable(actual[key]) == _comparable(value) for key, value in fields.items()
+        )
+        if len(matches) == 1:
+            matched_ids.append(matches[0].get("diner_id"))
+        checks.append(_check(f"diner_facts:{selector}={wanted_identity}", fields, actual, passed))
+    checks.append(_check(
+        "diner_identity_coverage", "one distinct diner per expected identity", matched_ids,
+        len(matched_ids) == len(expected) and None not in matched_ids
+        and len(set(matched_ids)) == len(matched_ids),
+    ))
+    return checks
+
+
+def _independent_recipe_checks(
+    result: dict[str, Any],
+    expected: dict[str, Any],
+    recipes: dict[str, Recipe] | None,
+) -> list[dict[str, Any]]:
+    """Audit source recipes and all visible suggestions using frozen case vocabulary.
+
+    This intentionally does not call RuleEngine or trust returned constraints,
+    suitability flags, ingredients, or fingerprints as an independent source.
+    The finite vocabulary is a regression oracle, not complete food-safety coverage.
+    """
+    trace_failures = []
+    food_failures = []
+    items = [("menu", item) for item in result.get("menu", [])]
+    items += [("replacement_suggestions", item)
+              for item in result.get("replacement_suggestions", [])]
+    for location, item in items:
+        recipe_id = item.get("recipe_id")
+        recipe = (recipes or {}).get(recipe_id)
+        evidence = {"location": location, "recipe_id": recipe_id}
+        if recipe is None:
+            trace_failures.append(evidence | {"reason": "recipe_missing_from_local_catalog"})
+            food_failures.append(evidence | {"reason": "cannot_audit_unknown_recipe"})
+            continue
+        provenance = item.get("provenance") or {}
+        if (item.get("name") != recipe.name
+                or provenance.get("recipe_id") != recipe.recipe_id
+                or provenance.get("source_row") != recipe.source_row
+                or provenance.get("fingerprint") != recipe.fingerprint):
+            trace_failures.append(evidence | {"reason": "source_identity_mismatch"})
+        # Include recipe steps: optional and step-only additions remain in scope.
+        source_text = recipe.raw_ingredients + "\n" + recipe.steps
+        visible_text = json.dumps({key: item.get(key) for key in (
+            "ingredients", "ingredient_details", "steps", "cooking_steps"
+        )}, ensure_ascii=False)
+        for rule in expected.get("independent_food_rules", []):
+            for origin, raw_text in (("catalog", source_text), ("response", visible_text)):
+                text = re.sub(r"\s+", "", raw_text).casefold()
+                for ignored in rule.get("ignore_phrases", []):
+                    text = text.replace(ignored.casefold(), " ")
+                matched = [term for term in rule["forbidden_terms"] if term.casefold() in text]
+                if matched:
+                    food_failures.append(evidence | {
+                        "origin": origin, "rule": rule["label"], "matched": matched,
+                    })
+    return [
+        _check("catalog_traceability", "menu and suggestions match local recipe source",
+               trace_failures, bool(result.get("menu")) and recipes is not None
+               and not trace_failures),
+        _check("independent_food_constraints", "authored food rules pass for menu and suggestions",
+               food_failures, bool(result.get("menu")) and recipes is not None
+               and not food_failures),
+    ]
+
+
 def evaluate_turn(
     result: dict[str, Any],
     expected: dict[str, Any],
     *,
     previous_menu_ids: list[str] | None,
+    recipes: dict[str, Recipe] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate declared checks using only observable structured response data."""
+    """Evaluate declared response facts plus the optional independent source oracle."""
     outcomes: list[dict[str, Any]] = []
     menu_ids = _menu_ids(result)
     state = result.get("conversation_state") or {}
@@ -178,9 +280,15 @@ def evaluate_turn(
         actual = {key: constraints.get(key) for key in expected["constraints"]}
         outcomes.append(
             _check(
-                "constraints", expected["constraints"], actual, actual == expected["constraints"]
+                "constraints", expected["constraints"], actual,
+                all(_comparable(actual[key]) == _comparable(value)
+                    for key, value in expected["constraints"].items())
             )
         )
+    if "expected_diners" in expected:
+        outcomes.extend(_diner_checks(result, expected["expected_diners"]))
+    if expected.get("catalog_traceability") or "independent_food_rules" in expected:
+        outcomes.extend(_independent_recipe_checks(result, expected, recipes))
     if "clarification_fields" in expected:
         actual = sorted(
             question.get("field") for question in result.get("clarification_questions", [])
@@ -323,6 +431,7 @@ def evaluate_turn(
 def _dataset_metadata(path: Path, suite: SuiteDefinition) -> dict[str, Any]:
     return {
         "version": suite.dataset_version,
+        "validator_version": VALIDATOR_VERSION,
         "schema_version": suite.schema_version,
         "data_scope": suite.data_scope,
         "path": path.relative_to(PROJECT_ROOT).as_posix()
@@ -354,8 +463,14 @@ def run_functional_cases(
     base_url: str,
     timeout_seconds: float,
     transport: httpx.BaseTransport | None = None,
+    recipes: dict[str, Recipe] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Execute every conversation independently against the structured API."""
+    if recipes is None and any(
+        turn.expect.get("catalog_traceability") or "independent_food_rules" in turn.expect
+        for case in suite.cases for turn in case.turns
+    ):
+        recipes = load_synthetic_catalog().recipes
     case_reports: list[dict[str, Any]] = []
     raw_responses: list[dict[str, Any]] = []
     run_id = uuid4().hex[:12]
@@ -458,7 +573,7 @@ def run_functional_cases(
                     break
                 checks = [_check("http_200", 200, response.status_code, True)]
                 checks.extend(
-                    evaluate_turn(result, turn.expect, previous_menu_ids=previous_menu_ids)
+                    evaluate_turn(result, turn.expect, previous_menu_ids=previous_menu_ids, recipes=recipes)
                 )
                 state = result.get("conversation_state") or {}
                 response_session = state.get("session_id")
@@ -518,6 +633,7 @@ async def run_performance_cases(
 ) -> dict[str, Any]:
     """Replay declared cases over SSE for client-observed timing."""
     observations: list[StreamObservation] = []
+    scheduled = {case.case_id: len(case.turns) for case in suite.cases if case.measure_performance}
     single_ids: set[str] = set()
     multi_ids: set[str] = set()
     async with httpx.AsyncClient(
@@ -538,17 +654,28 @@ async def run_performance_cases(
                     turn=number,
                     session_id=session_id,
                 )
+                if observation.completed and len(case.turns) > 1 and (
+                    not observation.session_id
+                    or (session_id is not None and observation.session_id != session_id)
+                ):
+                    observation = replace(
+                        observation, completed=False, error="invalid_session_continuity"
+                    )
                 observations.append(observation)
                 if observation.session_id:
                     session_id = observation.session_id
                 if not observation.completed:
                     break
-    all_summary = summarize_observations(observations, multi_turn=True)
+    all_summary = summarize_observations(
+        observations, multi_turn=True, expected_requests=sum(scheduled.values())
+    )
     single_summary = summarize_observations(
-        [item for item in observations if item.scenario_id in single_ids], multi_turn=False
+        [item for item in observations if item.scenario_id in single_ids], multi_turn=False,
+        expected_requests=sum(scheduled[key] for key in single_ids),
     )
     multi_summary = summarize_observations(
-        [item for item in observations if item.scenario_id in multi_ids], multi_turn=True
+        [item for item in observations if item.scenario_id in multi_ids], multi_turn=True,
+        expected_requests=sum(scheduled[key] for key in multi_ids),
     )
 
     def metric(summary: dict[str, Any], key: str) -> dict[str, Any]:
@@ -558,11 +685,19 @@ async def run_performance_cases(
             "p50_ms": distribution["p50"],
             "p95_ms": distribution["p95"],
             "status": distribution["status_by_mean"],
+            "successful_only_status": distribution["successful_only_status_by_mean"],
         }
 
     return {
         "thresholds_are_strict_less_than": True,
-        "threshold_result_valid": bool(observations) and all_summary["threshold_result_valid"],
+        "threshold_result_valid": all(
+            summary["threshold_result_valid"]
+            for summary in (all_summary, single_summary, multi_summary)
+        ),
+        "counts": {key: all_summary[key] for key in (
+            "scheduled", "requests", "successful", "failed", "not_executed"
+        )},
+        "measurement_scope": "successful_request_latency; invalid groups are not scored",
         "ttft": metric(all_summary, "ttft_ms"),
         "single_e2e": metric(single_summary, "e2e_ms"),
         "multi_average": metric(multi_summary, "e2e_ms"),
@@ -576,18 +711,23 @@ def summarize_run(
     performance: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Calculate a transparent internal diagnostic score, never an official score."""
-    rubric_scores: dict[str, float] = {}
+    rubric_scores: dict[str, float | None] = {}
     for rubric, weight in RUBRIC_WEIGHTS.items():
         selected = [case for case in cases if case.get("rubric") == rubric]
         passed = sum(bool(case.get("passed")) for case in selected)
         rubric_scores[rubric] = round(weight * passed / len(selected), 2) if selected else 0.0
-    performance_score = 0.0
-    if performance:
+    functional_score = round(sum(value for value in rubric_scores.values() if value is not None), 2)
+    performance_status = "not_run" if performance is None else "invalid"
+    performance_score = None
+    if performance and performance.get("threshold_result_valid") and all(
+        performance.get(metric, {}).get("status") in {"excellent", "qualified", "exceeded"}
+        for metric in PERFORMANCE_METRICS
+    ):
+        performance_status = "valid"
         performance_score = sum(
-            PERFORMANCE_POINTS.get(str(performance.get(metric, {}).get("status", "no_data")), 0.0)
-            for metric in PERFORMANCE_METRICS
+            PERFORMANCE_POINTS[performance[metric]["status"]] for metric in PERFORMANCE_METRICS
         )
-    rubric_scores["performance"] = round(performance_score, 2)
+    rubric_scores["performance"] = performance_score
     total = len(cases)
     passed_cases = sum(bool(case.get("passed")) for case in cases)
     return {
@@ -596,7 +736,12 @@ def summarize_run(
         "passed": passed_cases,
         "failed": total - passed_cases,
         "rubric_scores": rubric_scores,
-        "diagnostic_score": round(sum(rubric_scores.values()), 2),
+        "functional_score": functional_score,
+        "performance_status": performance_status,
+        "diagnostic_score_valid": performance_status == "valid",
+        "diagnostic_score": (
+            round(functional_score + performance_score, 2) if performance_score is not None else None
+        ),
     }
 
 
@@ -611,9 +756,14 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- 运行时间（UTC）：{report.get('started_at', 'unknown')}",
         f"- Git 提交：`{report.get('git_commit', 'unknown')}`",
         f"- 数据集：`{dataset['version']}`",
+        f"- 验证器：`{dataset.get('validator_version', 'legacy/unspecified')}`",
         f"- 数据集 SHA-256：`{dataset['sha256']}`",
         f"- 功能场景：{summary['passed']}/{summary['cases']} 通过",
-        f"- 内部诊断分：{summary['diagnostic_score']}/100",
+        f"- 功能诊断分：{summary.get('functional_score', '未记录')}/70",
+        f"- 性能有效性：{summary.get('performance_status', '未记录')}",
+        (f"- 内部诊断分：{summary['diagnostic_score']}/100"
+         if summary['diagnostic_score'] is not None else
+         "- 内部诊断分：未生成（性能无效或未执行，不参与接纳评分）"),
         "",
         "## 分项诊断",
         "",
@@ -627,7 +777,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
         "performance": "性能",
     }
     for key in ("basic", "complex", "interaction", "performance"):
-        lines.append(f"| {labels[key]} | {summary['rubric_scores'][key]} |")
+        score = summary["rubric_scores"][key]
+        lines.append(f"| {labels[key]} | {score if score is not None else '不计分'} |")
     lines.extend(
         ["", "## 场景运行情况", "", "| 场景 | 分项 | 结果 | 失败检查 |", "|---|---|---|---|"]
     )
@@ -647,6 +798,14 @@ def _render_markdown(report: dict[str, Any]) -> str:
             [
                 "",
                 "## 客户端性能观测",
+                "",
+                f"阈值结果有效：{performance.get('threshold_result_valid', False)}。"
+                "以下延迟仅统计成功请求；无效组的耗时不能作为整体达标证据。",
+                "",
+                "计划 / 已执行 / 成功 / 失败 / 未执行：" + " / ".join(
+                    str(performance.get("counts", {}).get(key, "未记录"))
+                    for key in ("scheduled", "requests", "successful", "failed", "not_executed")
+                ),
                 "",
                 "| 指标 | 平均值（ms） | P50 | P95 | 档位 |",
                 "|---|---:|---:|---:|---|",
@@ -710,13 +869,18 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize_run(cases, performance=performance)
     finished_at = datetime.now(timezone.utc)
     report: dict[str, Any] = {
-        "report_schema_version": "1.0",
+        "report_schema_version": "2.0",
+        "validator_version": VALIDATOR_VERSION,
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
         "elapsed_seconds": round((finished_at - started_at).total_seconds(), 3),
         "git_commit": _git_commit(),
         "base_url": base_url,
         "dataset": _dataset_metadata(suite_path, suite),
+        "recipe_source": {
+            "path": RECIPE_PATH.as_posix(),
+            "sha256": hashlib.sha256((PROJECT_ROOT / RECIPE_PATH).read_bytes()).hexdigest(),
+        },
         "summary": summary,
         "cases": cases,
     }

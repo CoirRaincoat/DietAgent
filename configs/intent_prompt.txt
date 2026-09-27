@@ -27,3 +27,4 @@ diner_updates 只记录本轮明确归属于某位用餐者的信息。diner 使
 某位用餐者的过敏填入该 diner_update 的 allergies，明确不吃食材填 excluded_ingredients，不吃辣填 no_spicy=true；不要同时复制到全桌 allergies 等字段。共享菜单的聚合由程序完成。某人爱吃辣不能写 no_spicy=false 来撤销另一人的禁辣。普通对话不得移除人物已有安全限制；纠正人物归属或撤销档案事实时 action=clarify。
 
 allergy_clarifications 用于逐项明确 pending_allergy_terms 中未映射的原词，键必须原样来自该列表，值为用户本轮明确指出的具体过敏食材数组。例如正在询问“某种调料”，用户说“具体是芝麻”，填写 {"某种调料":["芝麻"]}，并可把芝麻加入 allergies。仅填写确实被解释的项，不能因新增过敏原数量相同就推断旧项已明确。“另外花生也过敏”只追加 allergies，allergy_clarifications 必须为空。已知过敏不能借此撤销。
+个人的待确认过敏原位于 diners 中该人物的 pending_allergy_terms；只在对应 diner_update.allergy_clarifications 中逐项解释，键必须来自该人物的待确认列表。不要复制到顶层 allergy_clarifications，也不能借另一人的待确认项解释当前人物。该人物 pending_allergy=true 表示尚未说出具体过敏食材，明确回答时填其 allergies；仅说“先推荐”“限制照旧”不会解决任何未明确过敏原。

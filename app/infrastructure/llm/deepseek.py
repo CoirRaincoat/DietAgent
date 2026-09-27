@@ -8,6 +8,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.agent.diners import DinerConflict, find_diner
+from app.domain.allergy_mentions import requires_allergy_clarification
 from app.domain.models import Intent, SessionState, UserProfile
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 
@@ -145,11 +147,10 @@ class DeepSeekLLM(BaseLLM):
                 raise ValueError("Missing action")
             intent = Intent.model_validate(result, strict=True)
             self._validate_intent(intent, state)
-            allergy_text = re.sub(
-                r"(?:没有|没|无)(?:任何|其他|额外)?(?:食物|食材)?过敏(?:史)?|不(?:会)?过敏|非过敏",
-                "", message,
-            )
-            if "过敏" in allergy_text and not intent.allergies and intent.action != "clarify":
+            if (
+                requires_allergy_clarification(message, intent, state)
+                and intent.action != "clarify"
+            ):
                 return intent.model_copy(update={
                     "action": "clarify",
                     "clarification": "你提到了过敏，请确认具体过敏食材后再规划菜单。",
@@ -192,12 +193,19 @@ class DeepSeekLLM(BaseLLM):
             ]
             if any(not value.strip() or len(value) > 100 for value in values):
                 raise ValueError("Invalid diner update")
-        for pending, values in intent.allergy_clarifications.items():
-            if (
-                pending not in state.pending_allergy_terms or not values or len(values) > 10
-                or any(not item.strip() or len(item) > 100 for item in values)
-            ):
-                raise ValueError("Invalid pending allergy resolution")
+            if update.allergy_clarifications:
+                try:
+                    diner = find_diner(state.diners, update)
+                except DinerConflict as error:
+                    raise ValueError("Ambiguous allergy owner") from error
+                if diner is None:
+                    raise ValueError("No attributed pending allergy")
+                DeepSeekLLM._validate_allergy_clarifications(
+                    update.allergy_clarifications, diner.pending_allergy_terms
+                )
+        DeepSeekLLM._validate_allergy_clarifications(
+            intent.allergy_clarifications, state.pending_allergy_terms
+        )
         if getattr(intent, "clear_time_limit", False) and intent.max_minutes is not None:
             raise ValueError("Conflicting time constraints")
         if intent.meal_type is not None and intent.meal_type not in _MEAL_TYPES:
@@ -226,6 +234,19 @@ class DeepSeekLLM(BaseLLM):
             raise ValueError("Unexpected replacement target")
         if intent.no_spicy is False and state.constraints.no_spicy:
             raise ValueError("Cannot silently withdraw existing constraint")
+
+    @staticmethod
+    def _validate_allergy_clarifications(
+        clarifications: dict[str, list[str]], pending_terms: list[str]
+    ) -> None:
+        if len(clarifications) > 10:
+            raise ValueError("Too many allergy clarifications")
+        for pending, values in clarifications.items():
+            if (
+                pending not in pending_terms or not values or len(values) > 10
+                or any(not item.strip() or len(item) > 100 for item in values)
+            ):
+                raise ValueError("Invalid pending allergy resolution")
 
     async def explain(self, facts: dict[str, str]) -> list[str]:
         if not facts:

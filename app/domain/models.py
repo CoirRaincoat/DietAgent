@@ -61,6 +61,7 @@ class DinerUpdate(DomainModel):
     aliases: list[str] = Field(default_factory=list, max_length=10)
     attendance: bool | None = None
     allergies: list[str] = Field(default_factory=list, max_length=30)
+    allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     excluded_ingredients: list[str] = Field(default_factory=list, max_length=30)
     preferred_ingredients: list[str] = Field(default_factory=list, max_length=30)
     preferences: list[str] = Field(default_factory=list, max_length=30)
@@ -77,6 +78,9 @@ class Diner(DomainModel):
     attendance: bool = True
     profile_owner: bool = False
     allergies: list[str] = Field(default_factory=list)
+    # Unknown terms stay attached to this identity until explicitly resolved.
+    pending_allergy_terms: list[str] = Field(default_factory=list)
+    pending_allergy: bool = False
     excluded_ingredients: list[str] = Field(default_factory=list)
     preferred_ingredients: list[str] = Field(default_factory=list)
     preferences: list[str] = Field(default_factory=list)

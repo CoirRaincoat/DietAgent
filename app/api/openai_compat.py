@@ -178,6 +178,17 @@ def server_timing(result: ChatResult) -> str:
     return ", ".join(metrics)
 
 
+def assistant_text(result: ChatResult) -> str:
+    """Render verified menu facts independently of optional explanation selection."""
+    if result.status != "ok" or not result.conversation_state.menu_valid or not result.menu:
+        return result.reason
+    dishes = [
+        f"{item.slot}. {item.name}（菜谱ID：{item.recipe_id}；来源：{item.source}）"
+        for item in result.menu
+    ]
+    return "本餐菜单：\n" + "\n".join(dishes) + "\n\n" + result.reason
+
+
 def completion_body(result: ChatResult, completion_id: str, created: int) -> dict:
     """Render the non-streaming Chat Completions response subset."""
     return {
@@ -188,7 +199,7 @@ def completion_body(result: ChatResult, completion_id: str, created: int) -> dic
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": result.reason},
+                "message": {"role": "assistant", "content": assistant_text(result)},
                 "logprobs": None,
                 "finish_reason": "stop",
             }
@@ -199,7 +210,7 @@ def completion_body(result: ChatResult, completion_id: str, created: int) -> dic
 def stream_events(result: ChatResult, completion_id: str, created: int) -> Iterator[str]:
     """Yield standards-compatible SSE records from an already verified result."""
     yield _sse(_chunk(completion_id, created, {"role": "assistant", "content": ""}))
-    for content in _text_chunks(result.reason):
+    for content in _text_chunks(assistant_text(result)):
         yield _sse(_chunk(completion_id, created, {"content": content}))
     yield _sse(_chunk(completion_id, created, {}, finish_reason="stop"))
     yield "data: [DONE]\n\n"

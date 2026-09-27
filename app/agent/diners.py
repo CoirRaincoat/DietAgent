@@ -40,6 +40,15 @@ def _keys(diner: Diner) -> set[str]:
     return {_identity(diner.display_name), *(_identity(alias) for alias in diner.aliases)}
 
 
+def find_diner(diners: list[Diner], update: DinerUpdate) -> Diner | None:
+    """Resolve an attributed update without guessing among shared aliases."""
+    reference_keys = {_identity(update.diner), *(_identity(alias) for alias in update.aliases)}
+    matches = [diner for diner in diners if _keys(diner) & reference_keys]
+    if len(matches) > 1:
+        raise DinerConflict(f"无法确定“{update.diner}”对应哪位用餐者，请使用更明确的称呼。")
+    return matches[0] if matches else None
+
+
 def profile_diner(profile: UserProfile) -> Diner:
     """Create the profile owner's participant record without copying raw health data."""
     return Diner(
@@ -59,13 +68,8 @@ def apply_diner_updates(
     """Apply attributed facts while retaining absent people and stable IDs."""
     result = [diner.model_copy(deep=True) for diner in diners]
     for update in updates:
-        reference_keys = {_identity(update.diner), *(_identity(alias) for alias in update.aliases)}
-        matches = [diner for diner in result if _keys(diner) & reference_keys]
-        if len(matches) > 1:
-            raise DinerConflict(f"无法确定“{update.diner}”对应哪位用餐者，请使用更明确的称呼。")
-        if matches:
-            diner = matches[0]
-        else:
+        diner = find_diner(result, update)
+        if diner is None:
             diner = Diner(
                 diner_id=uuid5(
                     NAMESPACE_URL, f"fangtai-diner:{session_id}:{_identity(update.diner)}"

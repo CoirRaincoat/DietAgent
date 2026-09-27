@@ -23,6 +23,8 @@ Harness 严格按照赛题中的“小于”关系判定，不把等于边界算
 
 `excellent / qualified / exceeded` 是本地阈值标签，不是系统向评委申报的分数。报告同时保留失败请求、平均值、P50、P95、最小值和最大值，不能通过删除慢请求美化结果。
 
+报告格式 `2.0` 明确区分计划、已执行、成功、失败和未执行请求。出现失败或未执行时，`threshold_result_valid=false`，整组档位为 `invalid`；成功请求的延迟分布和 `successful_only_status_by_mean` 仅供诊断。合成回归汇总遇到无效或跳过的性能测量时，不生成性能分及综合诊断总分，详见 [REGRESSION.md](REGRESSION.md)。
+
 ## 运行方式
 
 先启动包含当前分支代码的 Compose 服务，再在 backend 容器内通过 frontend 代理测量完整链路。仅使用手写合成画像 `900001`，不发送原始健康档案。

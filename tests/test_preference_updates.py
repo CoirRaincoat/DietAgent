@@ -193,17 +193,24 @@ async def test_actual_catalog_preference_is_applied_and_survives_explanation(tmp
     sid = first.conversation_state.session_id
     second = await agent.chat(900001, "希望这餐有牛肉", session_id=sid)
     assert first.status == second.status == "ok"
-    first_already_covers_beef = any(
-        "牛肉" in item.steps or any("牛肉" in ingredient for ingredient in item.ingredients)
-        for item in first.menu
-    )
+
+    def has_beef(menu):
+        # Independent source evidence, not RuleEngine's own match result or a
+        # dish title. E.g. source row 462 declares 牛腱肉800克, never the literal
+        # 牛肉 in ingredients/steps; it already satisfies the beef preference.
+        beef_terms = ("牛肉", "牛腱", "牛腩", "牛里脊", "肥牛")
+        return any(
+            term in text
+            for item in menu
+            for text in [item.steps, *item.ingredients]
+            for term in beef_terms
+        )
+
+    first_already_covers_beef = has_beef(first.menu)
     changed = sum(a.recipe_id != b.recipe_id for a, b in zip(first.menu, second.menu))
     assert changed == (0 if first_already_covers_beef else 1)
     # The source may name an ingredient only in its cooking steps.
-    assert any(
-        "牛肉" in item.steps or any("牛肉" in ingredient for ingredient in item.ingredients)
-        for item in second.menu
-    )
+    assert has_beef(second.menu)
     explained = await agent.chat(900001, "解释刚才菜单", session_id=sid)
     assert [item.recipe_id for item in explained.menu] == [item.recipe_id for item in second.menu]
     assert "menu_modify" not in {event.name for event in explained.tool_calls}

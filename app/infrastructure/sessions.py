@@ -4,6 +4,7 @@ Connections use short transactions, never held during model calls. This MVP runs
 one API worker; the agent also serializes each session with an asyncio lock.
 """
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,6 +15,15 @@ from app.domain.models import ChatResult, SessionState
 
 class SessionConflict(Exception):
     pass
+
+
+def _upgrade_menu_structure(snapshot: dict) -> dict:
+    """Preserve stored counts when legacy snapshots lack their provenance flag."""
+    if "menu_structure_explicit" not in snapshot:
+        constraints = snapshot.get("meal_constraints") or snapshot.get("constraints") or {}
+        if "dish_count" in constraints or "soup_count" in constraints:
+            snapshot["menu_structure_explicit"] = True
+    return snapshot
 
 
 class SessionStore:
@@ -54,7 +64,7 @@ class SessionStore:
             return None
         if row[0] != user_id:
             raise SessionConflict("会话与用户不匹配。")
-        return SessionState.model_validate_json(row[1])
+        return SessionState.model_validate(_upgrade_menu_structure(json.loads(row[1])))
 
     def save(self, state: SessionState, expected_revision: int | None) -> None:
         with self._connect() as connection:
@@ -92,7 +102,9 @@ class SessionStore:
             raise SessionConflict("同一 request_id 不能用于不同请求。")
         if row[1] != revision:
             raise SessionConflict("该请求的结果已经过期，请使用新的 request_id。")
-        return ChatResult.model_validate_json(row[2])
+        result = json.loads(row[2])
+        result["conversation_state"] = _upgrade_menu_structure(result["conversation_state"])
+        return ChatResult.model_validate(result)
 
     def complete(
         self, result: ChatResult, expected_revision: int,

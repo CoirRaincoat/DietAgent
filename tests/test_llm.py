@@ -356,3 +356,173 @@ async def test_allergy_resolution_preserves_the_named_mapping(profile, state):
     async with client:
         intent = await adapter.parse("具体是芝麻", state, profile)
     assert intent.allergy_clarifications == {"某种调料": ["芝麻"]}
+
+
+async def test_personal_allergy_does_not_require_duplicate_global_field(profile, state):
+    adapter, client = adapter_for(completion({
+        "action": "plan", "people": 2, "meal_type": "晚餐",
+        "diner_updates": [{"diner": "爸爸", "attendance": True, "allergies": ["花生"]}],
+    }))
+    async with client:
+        intent = await adapter.parse("我和爸爸两个人晚餐，爸爸花生过敏", state, profile)
+    assert intent.action == "plan"
+    assert intent.allergies == []
+    assert intent.diner_updates[0].allergies == ["花生"]
+
+
+@pytest.mark.parametrize("message,action", [
+    ("过敏限制照旧", "plan"),
+    ("保留已有过敏限制", "plan"),
+    ("过敏限制照旧，换第二道", "replace"),
+    ("解释一下过敏限制", "explain"),
+    ("解释一下这份菜单如何避开过敏食材", "explain"),
+])
+async def test_existing_allergy_references_do_not_become_new_missing_facts(
+    message, action, profile, state
+):
+    result = {"action": action}
+    if action == "replace":
+        result["replace_slot"] = 2
+    adapter, client = adapter_for(completion(result))
+    async with client:
+        intent = await adapter.parse(message, state, profile)
+    assert intent.action == action
+    assert intent.allergies == []
+    assert state.constraints.allergies == ["花生"]
+
+
+@pytest.mark.parametrize("message", [
+    "过敏限制照旧，另外妈妈有食物过敏",
+    "爸爸的过敏限制照旧",  # There is no recorded father in this state.
+    "过敏限制照旧，花生和另一种食物过敏",
+    "解释菜单，我还有其他过敏",
+])
+async def test_reference_or_explanation_does_not_hide_missing_allergy(message, profile, state):
+    action = "explain" if message.startswith("解释") else "plan"
+    adapter, client = adapter_for(completion({"action": action}))
+    async with client:
+        intent = await adapter.parse(message, state, profile)
+    assert intent.action == "clarify"
+
+
+async def test_reference_requires_existing_allergy_evidence(profile, state):
+    state.constraints.allergies = []
+    adapter, client = adapter_for(completion({"action": "plan"}))
+    async with client:
+        intent = await adapter.parse("过敏限制照旧", state, profile)
+    assert intent.action == "clarify"
+
+
+async def test_personal_reference_requires_the_correct_known_owner(profile, state):
+    state.diners = [Diner(
+        diner_id="dad", display_name="爸爸", aliases=["我爸"], allergies=["花生"],
+    )]
+    adapter, client = adapter_for(completion({"action": "plan"}))
+    async with client:
+        assert (await adapter.parse("我爸的过敏限制照旧", state, profile)).action == "plan"
+        assert (await adapter.parse("妈妈的过敏限制照旧", state, profile)).action == "clarify"
+
+
+async def test_personal_resolution_preserves_scope_and_sends_pending_context(profile, state):
+    state.diners = [Diner(
+        diner_id="dad", display_name="爸爸", aliases=["我爸"], allergies=["鸡蛋"],
+        pending_allergy_terms=["神秘酱料"],
+    )]
+    observed = []
+
+    def handler(request):
+        observed.append(request)
+        return httpx.Response(200, json=completion({
+            "action": "plan", "diner_updates": [{
+                "diner": "我爸", "allergy_clarifications": {"神秘酱料": ["芝麻"]},
+            }],
+        }))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        intent = await DeepSeekLLM("fake-test-secret", client=client).parse(
+            "我爸过敏的神秘酱料具体是芝麻", state, profile
+        )
+    assert intent.action == "plan"
+    assert intent.allergy_clarifications == {}
+    assert intent.diner_updates[0].allergy_clarifications == {"神秘酱料": ["芝麻"]}
+    context = json.loads(json.loads(observed[0].content)["messages"][1]["content"])
+    assert context["diners"][0]["pending_allergy_terms"] == ["神秘酱料"]
+
+
+@pytest.mark.parametrize("diner,clarifications", [
+    ("妈妈", {"神秘酱料": ["芝麻"]}),
+    ("爸爸", {"未询问项": ["芝麻"]}),
+    ("爸爸", {"神秘酱料": []}),
+    ("爸爸", {"神秘酱料": [""]}),
+])
+async def test_personal_resolution_rejects_wrong_owner_or_invalid_mapping(
+    diner, clarifications, profile, state
+):
+    state.diners = [Diner(
+        diner_id="dad", display_name="爸爸", pending_allergy_terms=["神秘酱料"],
+    )]
+    adapter, client = adapter_for(completion({
+        "action": "plan", "diner_updates": [{
+            "diner": diner, "allergy_clarifications": clarifications,
+        }],
+    }))
+    async with client:
+        with pytest.raises(LLMOutputError):
+            await adapter.parse("神秘酱料具体是芝麻", state, profile)
+
+
+async def test_ambiguous_personal_resolution_is_a_safe_provider_output_error(profile, state):
+    state.diners = [
+        Diner(diner_id="dad", display_name="爸爸", pending_allergy_terms=["神秘酱料"]),
+        Diner(diner_id="mom", display_name="妈妈"),
+    ]
+    adapter, client = adapter_for(completion({
+        "action": "plan", "diner_updates": [{
+            "diner": "爸爸", "aliases": ["妈妈"],
+            "allergy_clarifications": {"神秘酱料": ["芝麻"]},
+        }],
+    }))
+    async with client:
+        with pytest.raises(LLMOutputError):
+            await adapter.parse("爸爸的神秘酱料具体是芝麻", state, profile)
+
+
+@pytest.mark.parametrize("message", ["过敏限制照旧", "爸爸的过敏限制照旧"])
+@pytest.mark.parametrize("pending", [
+    {"pending_allergy_terms": ["神秘酱料"]}, {"pending_allergy": True},
+])
+async def test_pending_personal_reference_does_not_create_another_missing_fact(
+    message, pending, profile, state
+):
+    state.constraints.allergies = []
+    state.diners = [Diner(
+        diner_id="dad", display_name="爸爸", **pending,
+    )]
+    adapter, client = adapter_for(completion({"action": "plan"}))
+    async with client:
+        intent = await adapter.parse(message, state, profile)
+    assert intent.action == "plan"
+    assert not state.pending_allergy
+    for field, value in pending.items():
+        assert getattr(state.diners[0], field) == value
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("没有其他忌口，另外不吃辣，安排3道菜。", "plan"),
+    ("另外我还有其他食物过敏。", "clarify"),
+])
+async def test_existing_regression_profile_reference_preserves_known_scope(
+    suffix, expected, profile, state
+):
+    state.diners = [Diner(
+        diner_id="profile-1", display_name="用户", profile_owner=True, allergies=["花生"],
+    )]
+    adapter, client = adapter_for(completion({
+        "action": "plan", "people": 1, "meal_type": "晚餐", "dish_count": 3, "no_spicy": True,
+    }))
+    async with client:
+        intent = await adapter.parse(
+            "1人晚餐，沿用我档案里的过敏和健康要求，" + suffix, state, profile
+        )
+    assert intent.action == expected
+    assert intent.allergies == []
