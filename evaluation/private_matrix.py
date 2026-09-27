@@ -511,7 +511,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- 完成轮次：{summary['completed_turns']}/{summary['expected_turns']}",
         f"- 完整覆盖：{'是' if summary['coverage_complete'] else '否'}",
         f"- 有失败代码的会话：{summary['cells_with_failures']}",
-        f"- 有菜单的响应：{summary['menu_observations']}；菜谱来源核验：{summary['source_checks']}",
+        f"- 有菜单的响应：{summary.get('menu_observations', 0)}；"
+        f"菜谱来源核验：{summary.get('source_checks', 0)}",
         f"- 本地耗时：{summary.get('local_elapsed_seconds', 0)} 秒"
         "（人工意图 fixture，不代表真实模型延迟）",
         "",

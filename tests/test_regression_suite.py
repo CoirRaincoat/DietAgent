@@ -408,7 +408,7 @@ async def test_failed_performance_is_unscored_and_counts_skipped_turns(
     report = {"dataset": {"version": "v2", "sha256": "test"}, "cases": cases,
               "summary": summary, "performance": performance}
     paths = write_report_bundle(tmp_path, report, [])
-    markdown = paths["markdown"].read_text()
+    markdown = paths["markdown"].read_text(encoding="utf-8")
     assert "阈值结果有效：False" in markdown
     assert "计划 / 已执行 / 成功 / 失败 / 未执行" in markdown
     assert "内部诊断分：未生成" in markdown
