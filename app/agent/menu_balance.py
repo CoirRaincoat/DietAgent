@@ -125,11 +125,15 @@ def balance_rank(recipes: Sequence[Recipe], target_count: int | None = None) -> 
         min(category_counts["protein"], protein_target),
         min(category_counts["staple"], staple_target),
         category_types,
+        # Once the three roles are covered, extra protein dishes and extra
+        # staples should not displace a complementary vegetable dish just
+        # because their preparation method is different.
+        -max(0, category_counts["protein"] - protein_target) if protein_target else 0,
+        -max(0, category_counts["staple"] - staple_target) if staple_target else 0,
         min(len(method_counts), method_target),
         cold_target_met,
         temperature_mix,
         -max(0, dominant_method - 1),
-        -max(0, category_counts["staple"] - 1),
         -max(0, known_methods - len(recipes)),
     )
 

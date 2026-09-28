@@ -22,6 +22,7 @@ from app.agent.diners import (
 from app.agent.menu_balance import analyze_menu_balance
 from app.agent.planner import MenuPlanner, PlanResult
 from app.agent.response_copy import clarification_copy, required_fact_ids, response_facts
+from app.agent.suggestions import replacement_candidates
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
 from app.domain.allergy_mentions import requires_allergy_clarification
 from app.domain.models import (
@@ -521,20 +522,12 @@ class MealAgent:
         menu = [self._item(recipe, i + 1, constraints, events) for i, recipe in enumerate(chosen)]
         chosen_ids = [recipe.recipe_id for recipe in chosen]
         suggestions: list[MenuItem] = []
-        # Same-role alternatives preserve the known structural properties of slot 1.
-        if chosen:
-            for candidate in safe:
-                if candidate.recipe_id in chosen_ids or compact(candidate.name) in {
-                    compact(recipe.name) for recipe in chosen
-                }:
-                    continue
-                if set(candidate.categories) != set(chosen[0].categories):
-                    continue
-                suggestion = self._item(candidate, 1, constraints, events)
-                suggestion.replacement_reason = "与第 1 道菜类别一致，已核对当前已知食材限制；份量仍需确认。"
-                suggestions.append(suggestion)
-                if len(suggestions) == 2:
-                    break
+        # Keep the current slot's role and verified food constraints while
+        # rotating equally suitable alternatives between conversations.
+        for candidate in replacement_candidates(chosen, safe, state.session_id):
+            suggestion = self._item(candidate, 1, constraints, events)
+            suggestion.replacement_reason = "可替换第 1 道菜，其他菜不变；食材限制已核对。"
+            suggestions.append(suggestion)
         nutrition = self.tools.call(
             "nutrition_analysis", events, recipes=chosen, constraints=constraints,
         )

@@ -1,5 +1,8 @@
+import csv
+
 from app.agent.planner import MenuPlanner
 from app.domain.models import Constraints, Ingredient, Recipe
+from app.infrastructure.data import PROJECT_ROOT, RECIPE_PATH, normalize_recipes
 from app.retrieval.keyword import KeywordRetriever
 from app.rules.engine import RuleEngine
 
@@ -151,3 +154,63 @@ def test_four_dish_menu_prefers_two_vegetable_dishes_over_repeated_protein():
     assert {"protein", "vegetable", "staple"} <= {
         category for item in result.recipes for category in item.categories
     }
+
+
+def test_source_preparation_steps_are_not_recommended_as_dishes():
+    with (PROJECT_ROOT / RECIPE_PATH).open(encoding="gb18030", newline="") as stream:
+        catalog = normalize_recipes(csv.DictReader(stream))
+    by_name = {item.name: item for item in catalog.values()}
+    for name in ("果蔬清洗", "蔬菜碎", "照烧汁", "蒜泥"):
+        assert "component" in by_name[name].categories
+        assert not by_name[name].eligible
+    assert by_name["葱香土豆泥"].eligible
+    assert by_name["凉拌秋葵"].eligible
+    result = MenuPlanner(RuleEngine()).plan(
+        [by_name["果蔬清洗"], by_name["凉拌秋葵"]],
+        Constraints(dish_count=1),
+    )
+    assert [item.name for item in result.recipes] == ["凉拌秋葵"]
+
+
+def test_planner_excludes_ineligible_candidate_without_component_label():
+    incomplete = recipe("incomplete", "白菜")
+    incomplete.eligible = False
+    complete = recipe("complete", "鸡蛋", "protein")
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [incomplete, complete], Constraints(dish_count=1),
+    )
+
+    assert [item.recipe_id for item in result.recipes] == ["complete"]
+
+
+def test_single_dish_menu_does_not_penalize_requested_protein():
+    protein = recipe("protein", "鸡蛋", "protein")
+    vegetable = recipe("vegetable", "白菜", "vegetable")
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [protein, vegetable], Constraints(dish_count=1),
+    )
+
+    assert [item.recipe_id for item in result.recipes] == ["protein"]
+
+
+def test_three_dish_menu_prefers_complement_to_repeated_protein():
+    mixed = recipe("mixed", "春笋烧麦", "protein")
+    mixed.categories = ["protein", "vegetable", "staple"]
+    mixed.methods = ["蒸"]
+    repeated_protein = recipe("protein", "牛肉", "protein")
+    repeated_protein.methods = ["炒"]
+    vegetable = recipe("vegetable", "青菜", "vegetable")
+    vegetable.methods = ["煮"]
+    staple = recipe("staple", "米饭", "staple")
+    staple.methods = ["焖"]
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [mixed, repeated_protein, vegetable, staple],
+        Constraints(dish_count=3),
+    )
+
+    assert result.failure is None
+    assert "vegetable" in {item.recipe_id for item in result.recipes}
+    assert sum("protein" in item.categories for item in result.recipes) <= 1

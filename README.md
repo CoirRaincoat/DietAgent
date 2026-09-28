@@ -108,6 +108,8 @@ npm --prefix frontend run build
 
 PR #2–#5 的问题复现、修复范围和验证证据见 [2026-09-27 审查与维修报告](docs/reviews/DietAgent_PR_Review_20260927.md)。
 
+后续算法优化的优先级、前置数据条件和逐项验收门槛见 [算法改进 TODO](docs/ALGORITHM_TODO.md)。
+
 浏览器测试在 frontend/ 执行，默认拦截 HTTP 返回独立手写合成响应，不调用模型：
 
 ```powershell

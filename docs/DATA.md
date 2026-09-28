@@ -28,7 +28,7 @@
 
 `categories` 包括 `protein`、`vegetable`、`staple`、`soup`、`dessert`、`drink`、`component`，烹饪角色根据菜名与主要原料进行启发式分类；其中 `protein` 必须在实际食材中发现蛋白来源，不从菜名推断，鸡精、鸡粉、蚝油等调味料及蟹味菇等名称相似的植物不作为证据。检查完整原料表，避免油盐水列在前面造成遗漏。这是检索信息，不能据此宣称“高蛋白”“低糖”。`methods` 是名称和步骤中的烹饪方式关键词，不能推导总耗时；`meal_types` 只来自已识别餐次标签，缺失时为空。
 
-记录质量标志包括 `missing_steps`、`missing_name`、`missing_ingredients`、`unparsed_ingredients`、`missing_labels`、`discarded_label_tokens`、`ambiguous_ingredient_quantity`、`processing_component`。前四项与加工中间产品令 `eligible=False`；缺失标签或用量不明确不会单独禁止推荐。缺步骤的“奶油打发”、面团发酵等中间产品、“自定义”烹饪程序及测试占位菜均保留，但不作为可推荐成菜。甜品、饮品与正餐是否匹配，由规划模块进一步决定。
+记录质量标志包括 `missing_steps`、`missing_name`、`missing_ingredients`、`unparsed_ingredients`、`missing_labels`、`discarded_label_tokens`、`ambiguous_ingredient_quantity`、`processing_component`。前四项与加工中间产品令 `eligible=False`；缺失标签或用量不明确不会单独禁止推荐。缺步骤的“奶油打发”、面团发酵及“果蔬清洗”“蔬菜碎”等加工程序、“自定义”烹饪程序及测试占位菜均保留，但不作为可推荐成菜；规划器也会再次核对 `eligible`。甜品、饮品与正餐是否匹配，由规划模块进一步决定。
 
 ## 用户档案规范化
 
