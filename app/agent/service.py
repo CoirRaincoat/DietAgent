@@ -508,6 +508,7 @@ class MealAgent:
                 "menu_modify", events, candidates=safe, constraints=constraints, current=current,
                 replace_slot=replace_slot,
                 reject_ids=rejected_ids,
+                query_terms=query_terms,
             )
         if planning.failure:
             return self._unresolved(state, planning.failure, "no_feasible_menu", events)

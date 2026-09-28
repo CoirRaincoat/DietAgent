@@ -3,8 +3,12 @@
 from dataclasses import dataclass, field
 
 from app.agent.menu_balance import balance_rank
+from app.agent.menu_diversity import menu_similarity_penalty
 from app.domain.models import Constraints, Recipe
+from app.retrieval.keyword import recipe_relevance_score
 from app.rules.engine import RuleDecision, RuleEngine, compact
+
+_DIVERSITY_POOL_LIMIT = 64
 
 
 @dataclass
@@ -125,6 +129,7 @@ class MenuPlanner:
         current: list[Recipe] | None = None,
         replace_slot: int | None = None,
         reject_ids: set[str] | None = None,
+        query_terms: list[str] | None = None,
     ) -> PlanResult:
         current = current or []
         rejected = set(reject_ids or set())
@@ -195,19 +200,46 @@ class MenuPlanner:
         # Soft category coverage never displaces already-valid dishes. It only
         # ranks free slots; every chosen recipe was independently screened.
         order = {recipe.recipe_id: i for i, recipe in enumerate(candidates)}
+        relevance_cache: dict[str, float] = {}
+
+        def relevance_for(recipe: Recipe) -> float:
+            if recipe.recipe_id not in relevance_cache:
+                relevance_cache[recipe.recipe_id] = recipe_relevance_score(
+                    recipe, query_terms or [], constraints, self.rules,
+                )
+            return relevance_cache[recipe.recipe_id]
 
         def choose(pool: list[Recipe]) -> Recipe:
             selected = [item for item in slots if item is not None]
-            def rank(recipe: Recipe) -> tuple:
-                balance = balance_rank([*selected, recipe], count)
-                return (
-                    *(-value for value in balance),
-                    -decisions[recipe.recipe_id].score,
+            ranked = [
+                (recipe, balance_rank([*selected, recipe], count))
+                for recipe in pool if recipe.recipe_id not in used
+            ]
+            # Preserve the existing menu-balance and health-preference order.
+            best_balance = max(balance for _, balance in ranked)
+            balanced = [recipe for recipe, balance in ranked if balance == best_balance]
+            best_rule_score = max(decisions[recipe.recipe_id].score for recipe in balanced)
+            equally_suitable = [
+                recipe for recipe in balanced
+                if decisions[recipe.recipe_id].score == best_rule_score
+            ]
+            # Compute query relevance before bounding the expensive
+            # similarity comparison, so a late explicit match is not lost.
+            relevance = {recipe.recipe_id: relevance_for(recipe) for recipe in equally_suitable}
+            equally_suitable.sort(key=lambda recipe: (
+                -relevance[recipe.recipe_id],
+                order.get(recipe.recipe_id, len(order)), recipe.recipe_id,
+            ))
+            finalists = equally_suitable[:_DIVERSITY_POOL_LIMIT]
+            best_relevance = relevance[finalists[0].recipe_id]
+            return min(
+                (recipe for recipe in finalists if relevance[recipe.recipe_id] == best_relevance),
+                key=lambda recipe: (
+                    menu_similarity_penalty(recipe, selected),
                     order.get(recipe.recipe_id, len(order)),
                     recipe.recipe_id,
-                )
-
-            return min((r for r in pool if r.recipe_id not in used), key=rank)
+                ),
+            )
 
         soups_needed = soups - preserved_soups
         for index, recipe in enumerate(slots):
