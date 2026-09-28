@@ -105,6 +105,8 @@ runtime/self_assessments/<UTC时间>-<随机后缀>/
 
 建议首先打开 `assessment.md`。门禁失败后，再进入对应的 `regression/report.md`、`responses.jsonl` 或 `private/failures.jsonl` 定位原因。`runtime/` 已被 Git 忽略；不要把私有报告、会话数据库或原始输入加入提交。
 
+合成回归的 `regression/report.md` 另列“菜单质量观察（不计分）”及逐轮记录，可用于记录优化前基线。固定数据集哈希、源菜谱哈希、模型配置和运行环境后，再比较类别覆盖、做法种数、冷热证据与食材重合度。该部分目前只覆盖**公开合成回归**，不代表私有 50×20 矩阵或官方专家评分；`assessment.json` 的原有接纳门禁和总分不会因这些观察值变化。
+
 ## 退出码
 
 - `0`：所有已要求的步骤和质量门禁通过；

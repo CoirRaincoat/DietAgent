@@ -24,6 +24,7 @@ import httpx
 from app.domain.models import Recipe
 from app.infrastructure.data import RECIPE_PATH
 from app.infrastructure.synthetic import load_synthetic_catalog
+from evaluation.menu_quality import menu_quality_snapshot, summarize_menu_quality
 from evaluation.reporting import write_bundle
 from evaluation.stream_performance import (
     StreamObservation,
@@ -33,7 +34,7 @@ from evaluation.stream_performance import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v2.json"
-VALIDATOR_VERSION = "synthetic-validator-v3"
+VALIDATOR_VERSION = "synthetic-validator-v4"
 SYNTHETIC_USER_IDS = {900001, 900002, 900003}
 RUBRIC_WEIGHTS = {"basic": 20.0, "complex": 20.0, "interaction": 30.0}
 PERFORMANCE_METRICS = ("ttft", "single_e2e", "multi_average")
@@ -135,6 +136,23 @@ def _check(name: str, expected: Any, actual: Any, passed: bool) -> dict[str, Any
 
 def _menu_ids(result: dict[str, Any]) -> list[str]:
     return [str(item.get("recipe_id", "")) for item in result.get("menu", [])]
+
+
+def _menu_quality_for_turn(
+    menu_ids: list[str], checks: list[dict[str, Any]], recipes: dict[str, Recipe] | None
+) -> dict[str, Any]:
+    """Observe quality only after independent source and food checks pass."""
+    by_name = {check["check"]: check["passed"] for check in checks}
+    required = {"catalog_traceability", "independent_food_constraints"}
+    if not required.issubset(by_name):
+        return {"status": "unavailable", "reason": "validation_not_observed"}
+    if any(
+        not by_name[name]
+        for name in required | {"hard_constraints_satisfied"}
+        if name in by_name
+    ):
+        return {"status": "unavailable", "reason": "menu_validation_failed"}
+    return menu_quality_snapshot(menu_ids, recipes)
 
 
 def _copy_quality_checks(
@@ -654,6 +672,10 @@ def run_functional_cases(
                     "status": result.get("status"),
                     "menu_ids": current_ids,
                     "server_timings_ms": result.get("timings_ms", {}),
+                    "menu_quality": (
+                        _menu_quality_for_turn(current_ids, checks, recipes)
+                        if result.get("status") == "ok" else {"status": "not_applicable"}
+                    ),
                     "passed": all(check["passed"] for check in checks),
                     "checks": checks,
                 }
@@ -800,10 +822,23 @@ def summarize_run(
         "diagnostic_score": (
             round(functional_score + performance_score, 2) if performance_score is not None else None
         ),
+        "menu_quality": summarize_menu_quality(cases),
     }
 
 
 def _render_markdown(report: dict[str, Any]) -> str:
+    def display_observation(value: Any, *, missing: str = "不可比较") -> str:
+        return missing if value is None else str(value)
+
+    reason_labels = {
+        "validation_not_observed": "未执行独立核验",
+        "menu_validation_failed": "来源或硬约束核验未通过",
+        "empty_menu": "菜单为空",
+        "catalog_unavailable": "源菜谱不可用",
+        "duplicate_recipe_id": "菜品 ID 重复",
+        "recipe_not_in_catalog": "菜品不在源菜谱中",
+    }
+
     summary = report["summary"]
     dataset = report["dataset"]
     lines = [
@@ -837,6 +872,36 @@ def _render_markdown(report: dict[str, Any]) -> str:
     for key in ("basic", "complex", "interaction", "performance"):
         score = summary["rubric_scores"][key]
         lines.append(f"| {labels[key]} | {score if score is not None else '不计分'} |")
+    quality = summary.get("menu_quality")
+    if quality:
+        measured = quality["menus_measured"] > 0
+        temperature_display = (
+            "/".join(str(quality["temperature_counts"][key]) for key in ("hot", "cold", "unknown"))
+            if measured else "未测"
+        )
+        lines.extend([
+            "",
+            "## 菜单质量观察（不计分）",
+            "",
+            f"- 口径：`{quality['version']}`；已测菜单 {quality['menus_measured']} 份，"
+            f"不可计算 {quality['menus_unavailable']} 份。",
+            f"- 平均类别覆盖：{display_observation(quality['mean_role_coverage'], missing='未测')} / 3；"
+            f"平均做法种数：{display_observation(quality['mean_method_count'], missing='未测')}。",
+            f"- 菜谱文字冷热证据（热/冷/未知）：{temperature_display}。",
+            f"- 平均食材集合重合度："
+            f"{display_observation(quality['mean_ingredient_overlap'], missing='不可比较' if measured else '未测')}；"
+            f"平均最相似菜品对："
+            f"{display_observation(quality['mean_worst_pair_overlap'], missing='不可比较' if measured else '未测')}"
+            f"（可比较菜单 {quality['menus_with_comparable_pairs']} 份；越低仅表示字面食材更不同）。",
+            "- 不可计算原因：" + (
+                "、".join(
+                    f"{reason_labels.get(reason, reason)} {count} 份"
+                    for reason, count in quality["unavailable_reasons"].items()
+                ) or "无"
+            ) + "。",
+            "- 类别、做法与冷热来自菜谱文本启发式识别；食材重合度按原料名称精确匹配，"
+            "不是营养分，也不代表实际摄入量。单菜或缺少原料的菜单不填 0。",
+        ])
     lines.extend(
         ["", "## 场景运行情况", "", "| 场景 | 分项 | 结果 | 失败检查 |", "|---|---|---|---|"]
     )
@@ -850,6 +915,32 @@ def _render_markdown(report: dict[str, Any]) -> str:
         lines.append(
             f"| `{case['case_id']}` | {case['rubric']} | {'通过' if case['passed'] else '失败'} | {('、'.join(failed) if failed else '-')} |"
         )
+    if quality:
+        lines.extend([
+            "", "## 逐轮菜单质量（不计分）", "",
+            "| 场景 | 轮次 | 类别覆盖 / 3 | 做法种数 | 冷热证据（热/冷/未知） | 平均食材重合度 | 最高食材重合度 | 状态 |",
+            "|---|---:|---:|---:|---:|---:|---:|---|",
+        ])
+        for case in report["cases"]:
+            for turn in case.get("turns", []):
+                snapshot = turn.get("menu_quality")
+                if not snapshot or snapshot.get("status") == "not_applicable":
+                    continue
+                if snapshot["status"] == "available":
+                    lines.append(
+                        f"| `{case['case_id']}` | {turn['turn']} | "
+                        f"{snapshot['role_coverage']} | {snapshot['method_count']} | "
+                        f"{snapshot['temperature_counts']['hot']}/"
+                        f"{snapshot['temperature_counts']['cold']}/"
+                        f"{snapshot['temperature_counts']['unknown']} | "
+                        f"{display_observation(snapshot['ingredient_overlap_mean'])} | "
+                        f"{display_observation(snapshot['ingredient_overlap_max'])} | 可计算 |"
+                    )
+                else:
+                    lines.append(
+                        f"| `{case['case_id']}` | {turn['turn']} | - | - | - | - | - | "
+                        f"{reason_labels.get(snapshot['reason'], snapshot['reason'])} |"
+                    )
     performance = report.get("performance")
     if performance:
         lines.extend(
@@ -925,7 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize_run(cases, performance=performance)
     finished_at = datetime.now(timezone.utc)
     report: dict[str, Any] = {
-        "report_schema_version": "2.0",
+        "report_schema_version": "2.1",
         "validator_version": VALIDATOR_VERSION,
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
