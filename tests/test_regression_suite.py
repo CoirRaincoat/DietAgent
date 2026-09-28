@@ -195,7 +195,7 @@ def test_functional_runner_records_invalid_json_instead_of_losing_report() -> No
     assert raw[0]["response"] == "not-json"
 
 
-def test_summary_is_internal_and_uses_declared_rubric_weights() -> None:
+def test_summary_reports_case_counts_without_converting_passes_to_quality_points() -> None:
     cases = [
         {"rubric": "basic", "passed": True, "turns": [{"menu_quality": {
             "status": "available", "role_coverage": 2, "method_count": 3,
@@ -216,14 +216,14 @@ def test_summary_is_internal_and_uses_declared_rubric_weights() -> None:
         },
     )
 
-    assert summary["score_kind"] == "internal_diagnostic_not_official"
-    assert summary["rubric_scores"] == {
-        "basic": 10.0,
-        "complex": 20.0,
-        "interaction": 30.0,
-        "performance": 15.0,
+    assert summary["assessment_kind"] == "synthetic_regression_evidence_not_official"
+    assert summary["rubric_results"] == {
+        "basic": {"cases": 2, "passed": 1, "failed": 1},
+        "complex": {"cases": 1, "passed": 1, "failed": 0},
+        "interaction": {"cases": 1, "passed": 1, "failed": 0},
     }
-    assert summary["diagnostic_score"] == 75.0
+    assert summary["quality_score_status"] == "unscored_unvalidated"
+    assert "diagnostic_score" not in summary
     assert summary["menu_quality"]["menus_measured"] == 1
     assert summary["menu_quality"]["mean_role_coverage"] == 2
 
@@ -235,14 +235,8 @@ def test_report_bundle_writes_machine_human_and_raw_outputs(tmp_path) -> None:
             "cases": 1,
             "passed": 1,
             "failed": 0,
-            "diagnostic_score": 100.0,
-            "score_kind": "internal_diagnostic_not_official",
-            "rubric_scores": {
-                "basic": 20.0,
-                "complex": 20.0,
-                "interaction": 30.0,
-                "performance": 30.0,
-            },
+            "rubric_results": {"basic": {"cases": 1, "passed": 1, "failed": 0}},
+            "assessment_kind": "synthetic_regression_evidence_not_official",
         },
         "cases": [{"case_id": "basic", "rubric": "basic", "passed": True, "turns": []}],
     }
@@ -250,12 +244,12 @@ def test_report_bundle_writes_machine_human_and_raw_outputs(tmp_path) -> None:
 
     assert json.loads(paths["json"].read_text(encoding="utf-8"))["summary"]["passed"] == 1
     markdown = paths["markdown"].read_text(encoding="utf-8")
-    assert "仅供内部诊断" in markdown
+    assert "只记录内部回归证据" in markdown
     assert "basic" in markdown
     assert paths["responses"].read_text(encoding="utf-8").count("\n") == 1
 
 
-def test_quality_observation_is_visible_without_changing_score(tmp_path) -> None:
+def test_quality_observation_is_visible_without_inventing_score(tmp_path) -> None:
     case = {
         "case_id": "quality",
         "rubric": "basic",
@@ -285,8 +279,8 @@ def test_quality_observation_is_visible_without_changing_score(tmp_path) -> None
 
     assert "菜单质量观察（不计分）" in markdown
     assert "2/1/0" in markdown
-    assert summary["functional_score"] == 20.0
-    assert summary["diagnostic_score"] is None
+    assert summary["rubric_results"]["basic"]["passed"] == 1
+    assert "diagnostic_score" not in summary
 
 
 @pytest.fixture(scope="module")
@@ -501,9 +495,8 @@ async def test_failed_performance_is_unscored_and_counts_skipped_turns(
     cases = [{"case_id": key, "rubric": key, "passed": True, "turns": []}
              for key in ("basic", "complex", "interaction")]
     summary = summarize_run(cases, performance=performance)
-    assert summary["functional_score"] == 70
-    assert summary["rubric_scores"]["performance"] is None
-    assert summary["diagnostic_score"] is None
+    assert all(item["passed"] == 1 for item in summary["rubric_results"].values())
+    assert "diagnostic_score" not in summary
     assert summary["performance_status"] == "invalid"
     report = {"dataset": {"version": "v2", "sha256": "test"}, "cases": cases,
               "summary": summary, "performance": performance}
@@ -511,12 +504,12 @@ async def test_failed_performance_is_unscored_and_counts_skipped_turns(
     markdown = paths["markdown"].read_text(encoding="utf-8")
     assert "阈值结果有效：False" in markdown
     assert "计划 / 已执行 / 成功 / 失败 / 未执行" in markdown
-    assert "内部诊断分：未生成" in markdown
+    assert "推荐质量总分：未评定" in markdown
     assert "100.0/100" not in markdown
 
 
 def test_skipped_performance_produces_no_total_score():
     summary = summarize_run([{"rubric": "basic", "passed": True}], performance=None)
     assert summary["performance_status"] == "not_run"
-    assert summary["diagnostic_score"] is None
-    assert summary["rubric_scores"]["performance"] is None
+    assert "diagnostic_score" not in summary
+    assert summary["rubric_results"]["basic"]["passed"] == 1

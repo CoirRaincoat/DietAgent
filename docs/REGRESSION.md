@@ -36,7 +36,7 @@
 
 `runtime/` 已加入 `.gitignore`，不会误把运行报告或未来的本地数据提交到仓库。若需要在 PR 中展示结果，复制 `report.md` 的摘要即可；不要提交正式测试集或真实用户响应。
 
-报告记录数据集版本、验证器版本、数据集与菜谱 CSV SHA-256；对照时应固定这些输入和运行条件。报告中的分数明确标记为 `internal_diagnostic_not_official`，不是评委分数。
+报告记录数据集版本、验证器版本、数据集与菜谱 CSV SHA-256；对照时应固定这些输入和运行条件。新报告标记为 `synthetic_regression_evidence_not_official`，不生成质量总分。旧报告中的诊断分仅供历史追溯，不应与新证据卡当作同一指标比较。
 
 `report.json` 的 `cases[].turns[].menu_quality` 和 `summary.menu_quality`、`report.md` 的“菜单质量观察”采用 `source-menu-diversity-v1` 口径。每份可核验菜单记录：
 
@@ -44,15 +44,15 @@
 - `method_count`：源菜谱中不同做法标签的种数；`temperature_counts`：基于菜名与步骤的冷热文字证据，含 `unknown`。两者都不是实际出餐温度或烹饪验证。
 - `ingredient_overlap_mean` / `ingredient_overlap_max`：菜单菜品两两原料名称集合的 Jaccard 重合度均值与最大值。仅比较有原料名称的菜品对，按原文规范化后的名称精确匹配，包含调味料；不推断别名或份量。单菜或没有可比较菜品对时为 JSON `null`，不是 0。
 
-汇总中的均值以**菜单**为单位等权计算，`menus_measured` 是可计算菜单数，`menus_unavailable` 是成功菜单中因核验或数据缺失而不可计算的数量。非成功回复和 HTTP 失败不进入菜单质量均值，仍按原有功能检查计失败。上述观察值不改变 20/20/30/30 权重、评分门禁或正式验收结论；不能用它们宣称逐人定量营养均衡或真实上菜冷热比。旧 v1 测试集缺少独立源核验时会显示 `validation_not_observed`，不能与 v2 质量观测直接对比。
+汇总中的均值以**菜单**为单位等权计算，`menus_measured` 是可计算菜单数，`menus_unavailable` 是成功菜单中因核验或数据缺失而不可计算的数量。非成功回复和 HTTP 失败不进入菜单质量均值，仍按原有功能检查计失败。上述观察值不产生分数或正式验收结论；不能用它们宣称逐人定量营养均衡或真实上菜冷热比。旧 v1 测试集缺少独立源核验时会显示 `validation_not_observed`，不能与 v2 质量观测直接对比。
 
-- `functional_score` 是基础/复杂/交互三项的内部诊断分，满分 70。
+- `rubric_results` 分别记录基础/复杂/交互的已测、通过、失败用例数；不换算为质量分。
 - `performance.counts` 展示计划请求数 `scheduled`、已执行 `requests`、成功 `successful`、失败 `failed` 和因前轮失败等原因未执行的 `not_executed`。
 - 任何失败、未执行或缺少必要指标都会使性能结果无效。`performance_status` 为 `invalid`；跳过性能时为 `not_run`。
-- 性能无效或未执行时，`rubric_scores.performance` 和 `diagnostic_score` 都为 JSON `null`，`diagnostic_score_valid=false`，Markdown 显示不计分/未生成。不能把成功请求的低延迟折算成整组 30 分。
-- 成功请求的延迟分布保留作诊断；无效组 `status`/`status_by_mean` 为 `invalid`，成功子样本档位单列在 `successful_only_status`/`successful_only_status_by_mean`。只有全部计划请求成功、三个指标有效时才计算 20/20/30/30 权重的 100 分诊断总分。
+- 成功请求的延迟分布保留作诊断；无效组 `status`/`status_by_mean` 为 `invalid`，成功子样本档位单列在 `successful_only_status`/`successful_only_status_by_mean`。无论性能档位如何，都不把 4 次请求外推为整组 30 分。
+- `quality_score_status=unscored_unvalidated`：目前没有经独立校准的综合质量分；合成场景全过也不会生成 100 分。
 
-CLI 的 `--skip-performance` 可用于功能调试并依据功能结果退出，但不会产生有效总分或性能达标结论。
+CLI 的 `--skip-performance` 可用于功能调试并依据功能结果退出，但不会产生性能达标结论。
 
 ## Docker 运行
 

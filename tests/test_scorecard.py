@@ -69,22 +69,29 @@ def _private_report(*, failures: int = 0) -> dict:
     }
 
 
-def test_complete_evidence_produces_validated_score() -> None:
+def test_complete_regression_evidence_does_not_invent_quality_score() -> None:
     scorecard = build_scorecard(_regression_report(), _private_report())
 
     assert scorecard["acceptance_status"] == "pass"
-    assert scorecard["score_valid"] is True
-    assert scorecard["validated_score"] == 100.0
+    assert scorecard["schema_version"] == "self-assessment-v2"
+    assert scorecard["score_valid"] is False
+    assert scorecard["validated_score"] is None
+    assert scorecard["quality_score_status"] == "unscored_unvalidated"
+    assert scorecard["rubric_results"]["basic"] == {
+        "cases": 1,
+        "passed": 1,
+        "failed": 0,
+    }
     assert all(gate["status"] == "pass" for gate in scorecard["quality_gates"])
 
 
-def test_missing_performance_invalidates_total_without_erasing_functional_score() -> None:
+def test_missing_performance_is_incomplete_without_erasing_regression_counts() -> None:
     scorecard = build_scorecard(_regression_report(performance=False))
 
     assert scorecard["acceptance_status"] == "incomplete"
     assert scorecard["score_valid"] is False
     assert scorecard["validated_score"] is None
-    assert scorecard["functional_score"] == 70.0
+    assert scorecard["rubric_results"]["basic"]["passed"] == 1
 
 
 def test_hard_constraint_failure_blocks_misleading_high_score() -> None:
@@ -92,7 +99,6 @@ def test_hard_constraint_failure_blocks_misleading_high_score() -> None:
     report["cases"][0]["turns"][0]["checks"][0]["passed"] = False
     scorecard = build_scorecard(report)
 
-    assert scorecard["observed_diagnostic_score"] == 100.0
     assert scorecard["validated_score"] is None
     assert scorecard["acceptance_status"] == "fail"
     safety = next(
@@ -129,7 +135,28 @@ def test_writer_uses_utf8_and_cli_returns_gate_status(tmp_path) -> None:
     assert main(["--regression-report", str(regression_path), "--output-dir", str(output)]) == 0
     generated = json.loads((output / "assessment.json").read_text(encoding="utf-8"))
     assert generated["sources"]["regression_sha256"]
-    assert "接纳状态" in (output / "assessment.md").read_text(encoding="utf-8")
+    markdown = (output / "assessment.md").read_text(encoding="utf-8")
+    assert "回归门禁状态" in markdown
+    assert "推荐质量总分：**未评定**" in markdown
+    assert "100.0/100" not in markdown
+
+
+def test_legacy_full_diagnostic_score_is_never_promoted_to_quality_grade() -> None:
+    scorecard = build_scorecard(_regression_report(), _private_report())
+
+    assert scorecard["validated_score"] is None
+    assert "observed_diagnostic_score" not in scorecard
+    assert "rubric_scores" not in scorecard
+
+
+def test_reported_full_pass_cannot_hide_failed_case() -> None:
+    report = _regression_report()
+    report["cases"][0]["passed"] = False
+
+    scorecard = build_scorecard(report)
+
+    assert scorecard["acceptance_status"] == "fail"
+    assert scorecard["rubric_results"]["basic"]["failed"] == 1
 
 
 def test_loader_rejects_non_object_report(tmp_path) -> None:

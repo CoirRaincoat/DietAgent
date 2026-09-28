@@ -84,4 +84,4 @@ docker compose --project-name dietagent-pr5 --env-file configs/compose.env --fil
 
 ## 与功能回归合并运行
 
-`python -m evaluation.regression_suite` 会先用 `/chat` 执行版本化合成场景及结构化断言，再把测试集中声明 `measure_performance` 的单轮/多轮场景通过 SSE 重放。一次运行的功能结果、TTFT、完整耗时、数据集哈希和内部诊断分保存在同一报告目录，适合比较优化前后变化。它不会取代上面的多会话并发基线；完整命令和文件说明见 [REGRESSION.md](REGRESSION.md)。
+`python -m evaluation.regression_suite` 会先用 `/chat` 执行版本化合成场景及结构化断言，再把测试集中声明 `measure_performance` 的单轮/多轮场景通过 SSE 重放。一次运行的功能结果、TTFT、完整耗时、数据集哈希和菜单质量观察保存在同一报告目录，适合比较优化前后变化，但不生成未经校准的质量总分。它不会取代上面的多会话并发基线；完整命令和文件说明见 [REGRESSION.md](REGRESSION.md)。

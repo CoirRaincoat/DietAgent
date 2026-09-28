@@ -254,7 +254,7 @@ try {
         Write-Host "Private matrix skipped: provide -PrivateDataDir to include it." -ForegroundColor Yellow
     }
 
-    Write-Host "[6/6] Consolidating strict quality gates and score..." -ForegroundColor Cyan
+    Write-Host "[6/6] Consolidating regression gates and quality evidence..." -ForegroundColor Cyan
     $scorecardArgs = @(
         "run", "--rm",
         "-v", "${repoRoot}:/work",

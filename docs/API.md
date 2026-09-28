@@ -239,7 +239,7 @@ menu 和 replacement_suggestions 中每项包含：
 
 ## 真实数据验收与回归
 
-`python -m evaluation.regression_suite --base-url http://localhost:8080`：执行公开的版本化合成回归集，对 `/chat` 的菜谱来源、硬约束、多人适配和多轮最小修改做结构化断言，并通过 SSE 重放性能子集。每次输出 JSON、Markdown 和 JSONL 报告；内部诊断分不是官方评分，详见 [REGRESSION.md](REGRESSION.md)。
+`python -m evaluation.regression_suite --base-url http://localhost:8080`：执行公开的版本化合成回归集，对 `/chat` 的菜谱来源、硬约束、多人适配和多轮最小修改做结构化断言，并通过 SSE 重放性能子集。每次输出 JSON、Markdown 和 JSONL 报告；报告只给出回归证据，不把用例全过换算为质量满分，详见 [REGRESSION.md](REGRESSION.md)。
 
 `python -m evaluation.real_data`：全部真实档案及原始对话在本地验收，生成 evaluation/REAL_DATA_REPORT.md。`python -m evaluation.offline --unprepared`：原始对话不预置用餐信息，验证缺字段澄清。`python -m evaluation.offline`：显式配置测试用餐上下文，保留对规划下游的回归覆盖；上下文不是原始用户输入。以上均不调用外部模型，也不评价真实模型 NLU。
 
