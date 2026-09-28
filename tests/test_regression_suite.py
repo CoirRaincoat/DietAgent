@@ -197,7 +197,11 @@ def test_functional_runner_records_invalid_json_instead_of_losing_report() -> No
 
 def test_summary_is_internal_and_uses_declared_rubric_weights() -> None:
     cases = [
-        {"rubric": "basic", "passed": True},
+        {"rubric": "basic", "passed": True, "turns": [{"menu_quality": {
+            "status": "available", "role_coverage": 2, "method_count": 3,
+            "ingredient_overlap_mean": 0.2, "ingredient_overlap_max": 0.3,
+            "temperature_counts": {"hot": 2, "cold": 0, "unknown": 1},
+        }}]},
         {"rubric": "basic", "passed": False},
         {"rubric": "complex", "passed": True},
         {"rubric": "interaction", "passed": True},
@@ -220,6 +224,8 @@ def test_summary_is_internal_and_uses_declared_rubric_weights() -> None:
         "performance": 15.0,
     }
     assert summary["diagnostic_score"] == 75.0
+    assert summary["menu_quality"]["menus_measured"] == 1
+    assert summary["menu_quality"]["mean_role_coverage"] == 2
 
 
 def test_report_bundle_writes_machine_human_and_raw_outputs(tmp_path) -> None:
@@ -247,6 +253,40 @@ def test_report_bundle_writes_machine_human_and_raw_outputs(tmp_path) -> None:
     assert "仅供内部诊断" in markdown
     assert "basic" in markdown
     assert paths["responses"].read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_quality_observation_is_visible_without_changing_score(tmp_path) -> None:
+    case = {
+        "case_id": "quality",
+        "rubric": "basic",
+        "passed": True,
+        "turns": [{
+            "turn": 1,
+            "checks": [],
+            "menu_quality": {
+                "status": "available",
+                "role_coverage": 2,
+                "method_count": 3,
+                "temperature_counts": {"hot": 2, "cold": 1, "unknown": 0},
+                "ingredient_overlap_mean": 0.2,
+                "ingredient_overlap_max": 0.3,
+            },
+        }],
+    }
+    summary = summarize_run([case], performance=None)
+    report = {
+        "dataset": {"version": "v2", "sha256": "test"},
+        "summary": summary,
+        "cases": [case],
+    }
+
+    paths = write_report_bundle(tmp_path, report, [])
+    markdown = paths["markdown"].read_text(encoding="utf-8")
+
+    assert "菜单质量观察（不计分）" in markdown
+    assert "2/1/0" in markdown
+    assert summary["functional_score"] == 20.0
+    assert summary["diagnostic_score"] is None
 
 
 @pytest.fixture(scope="module")
@@ -314,6 +354,50 @@ def test_independent_oracle_accepts_source_menu_with_correct_personal_facts(reci
     checks = evaluate_turn(result, _multi_expectation(), previous_menu_ids=None,
                            recipes=recipe_catalog)
     assert all(check["passed"] for check in checks), checks
+
+
+def test_functional_runner_measures_only_independently_verified_source_menu(recipe_catalog):
+    result = _multi_person_result(recipe_catalog)
+    result["conversation_state"]["session_id"] = "quality-session"
+    suite = SuiteDefinition(
+        schema_version="2.0",
+        dataset_version="quality-test",
+        data_scope="synthetic",
+        description="source-backed quality observation",
+        cases=(CaseDefinition(
+            case_id="quality",
+            rubric="complex",
+            user_id=900001,
+            tags=(),
+            measure_performance=False,
+            turns=(TurnDefinition(message="test", expect=_multi_expectation()),),
+        ),),
+    )
+    response = httpx.Response(200, json=result)
+    transport = httpx.MockTransport(lambda request: response)
+
+    cases, _raw = run_functional_cases(
+        suite, base_url="http://test", timeout_seconds=1,
+        transport=transport, recipes=recipe_catalog,
+    )
+
+    assert cases[0]["passed"], cases[0]["turns"][0]["checks"]
+    observation = cases[0]["turns"][0]["menu_quality"]
+    assert observation["status"] == "available"
+    assert observation["dish_count"] == 4
+    assert observation["possible_pairs"] == 6
+
+    # An untrusted visible ingredient fails the independent source check.
+    result["menu"][0]["steps"] += "加入花生油炒香。"
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=result))
+    failed, _raw = run_functional_cases(
+        suite, base_url="http://test", timeout_seconds=1,
+        transport=transport, recipes=recipe_catalog,
+    )
+    assert not failed[0]["passed"]
+    assert failed[0]["turns"][0]["menu_quality"] == {
+        "status": "unavailable", "reason": "menu_validation_failed",
+    }
 
 
 @pytest.mark.parametrize("mutation", ["delete_all", "swap_people", "drop_aggregate"])
