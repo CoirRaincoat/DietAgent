@@ -152,7 +152,14 @@ def classify_recipe(name: str, ingredients: list[Ingredient], steps: str, labels
     """Heuristic culinary categories, not evidence of nutrient concentrations."""
     primary = name + " " + " ".join(item.name for item in ingredients[:3])
     categories: list[str] = []
-    if any(token in name for token in ("打发", "面团", "发酵", "揉面", "测试菜")) or name in {"冰糖粉", "乳化", "高温快煮", "68℃慢煮", "59℃慢煮", "派皮", "万能凉拌汁"} or name.endswith(("果酱", "辣椒酱", "番茄酱", "秋梨膏", "草莓酱", "蓝莓酱", "拌饭酱")):
+    if (
+        any(token in name for token in ("打发", "面团", "发酵", "揉面", "测试菜"))
+        or name in {
+            "冰糖粉", "乳化", "高温快煮", "68℃慢煮", "59℃慢煮", "派皮",
+            "万能凉拌汁", "果蔬清洗", "蔬菜碎", "照烧汁", "蒜泥",
+        }
+        or name.endswith(("果酱", "辣椒酱", "番茄酱", "秋梨膏", "草莓酱", "蓝莓酱", "拌饭酱"))
+    ):
         categories.append("component")
     if any(token in name for token in ("蛋糕", "饼干", "布丁", "冰淇淋", "冰激凌", "泡芙", "马卡龙", "巧克力", "蛋挞", "糖水", "桃胶", "雪媚娘", "麻薯", "双皮奶", "糯米糍", "大福", "慕斯", "糍粑", "冰棍", "班戟", "拉糕", "糯米糕", "月饼", "司康", "钵仔糕", "甜甜圈", "达克瓦兹")) or name.endswith(("派", "酥", "奶冻", "糖", "冻", "甜点")) or {"甜品", "甜点"} & set(labels):
         categories.append("dessert")

@@ -155,7 +155,12 @@ class MenuPlanner:
         allowed: dict[str, Recipe] = {}
         seen_names: set[str] = set()
         for recipe_id, recipe in catalog.items():
-            if recipe_id in rejected or compact(recipe.name) in rejected_names or not self._is_main_meal(recipe):
+            if (
+                recipe_id in rejected
+                or compact(recipe.name) in rejected_names
+                or not recipe.eligible
+                or not self._is_main_meal(recipe)
+            ):
                 continue
             decision = self.rules.evaluate(recipe, constraints)
             decisions[recipe_id] = decision
