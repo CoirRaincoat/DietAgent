@@ -36,9 +36,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v2.json"
 VALIDATOR_VERSION = "synthetic-validator-v4"
 SYNTHETIC_USER_IDS = {900001, 900002, 900003}
-RUBRIC_WEIGHTS = {"basic": 20.0, "complex": 20.0, "interaction": 30.0}
+RUBRICS = ("basic", "complex", "interaction")
 PERFORMANCE_METRICS = ("ttft", "single_e2e", "multi_average")
-PERFORMANCE_POINTS = {"excellent": 10.0, "qualified": 5.0, "exceeded": 0.0, "no_data": 0.0}
 Rubric = Literal["basic", "complex", "interaction"]
 
 
@@ -88,7 +87,7 @@ def load_suite(path: Path = DEFAULT_SUITE_PATH) -> SuiteDefinition:
             raise ValueError("Regression case IDs must be non-empty and unique")
         case_ids.add(case_id)
         rubric = value.get("rubric")
-        if rubric not in RUBRIC_WEIGHTS:
+        if rubric not in RUBRICS:
             raise ValueError(f"Unsupported rubric for case {case_id}")
         user_id = value.get("user_id")
         if user_id not in SYNTHETIC_USER_IDS:
@@ -790,38 +789,30 @@ def summarize_run(
     *,
     performance: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Calculate a transparent internal diagnostic score, never an official score."""
-    rubric_scores: dict[str, float | None] = {}
-    for rubric, weight in RUBRIC_WEIGHTS.items():
+    """Summarize observed regression evidence without inventing a quality grade."""
+    rubric_results: dict[str, dict[str, int]] = {}
+    for rubric in RUBRICS:
         selected = [case for case in cases if case.get("rubric") == rubric]
         passed = sum(bool(case.get("passed")) for case in selected)
-        rubric_scores[rubric] = round(weight * passed / len(selected), 2) if selected else 0.0
-    functional_score = round(sum(value for value in rubric_scores.values() if value is not None), 2)
+        rubric_results[rubric] = {
+            "cases": len(selected), "passed": passed, "failed": len(selected) - passed,
+        }
     performance_status = "not_run" if performance is None else "invalid"
-    performance_score = None
     if performance and performance.get("threshold_result_valid") and all(
         performance.get(metric, {}).get("status") in {"excellent", "qualified", "exceeded"}
         for metric in PERFORMANCE_METRICS
     ):
         performance_status = "valid"
-        performance_score = sum(
-            PERFORMANCE_POINTS[performance[metric]["status"]] for metric in PERFORMANCE_METRICS
-        )
-    rubric_scores["performance"] = performance_score
     total = len(cases)
     passed_cases = sum(bool(case.get("passed")) for case in cases)
     return {
-        "score_kind": "internal_diagnostic_not_official",
+        "assessment_kind": "synthetic_regression_evidence_not_official",
         "cases": total,
         "passed": passed_cases,
         "failed": total - passed_cases,
-        "rubric_scores": rubric_scores,
-        "functional_score": functional_score,
+        "rubric_results": rubric_results,
         "performance_status": performance_status,
-        "diagnostic_score_valid": performance_status == "valid",
-        "diagnostic_score": (
-            round(functional_score + performance_score, 2) if performance_score is not None else None
-        ),
+        "quality_score_status": "unscored_unvalidated",
         "menu_quality": summarize_menu_quality(cases),
     }
 
@@ -844,7 +835,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
     lines = [
         "# 合成回归测试报告",
         "",
-        "> 本报告及分数仅供内部诊断和版本对比，不是评委官方评分。",
+        "> 本报告只记录内部回归证据，不产生推荐质量总分或评委官方评分。",
         "",
         f"- 运行时间（UTC）：{report.get('started_at', 'unknown')}",
         f"- Git 提交：`{report.get('git_commit', 'unknown')}`",
@@ -852,16 +843,13 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- 验证器：`{dataset.get('validator_version', 'legacy/unspecified')}`",
         f"- 数据集 SHA-256：`{dataset['sha256']}`",
         f"- 功能场景：{summary['passed']}/{summary['cases']} 通过",
-        f"- 功能诊断分：{summary.get('functional_score', '未记录')}/70",
         f"- 性能有效性：{summary.get('performance_status', '未记录')}",
-        (f"- 内部诊断分：{summary['diagnostic_score']}/100"
-         if summary['diagnostic_score'] is not None else
-         "- 内部诊断分：未生成（性能无效或未执行，不参与接纳评分）"),
+        "- 推荐质量总分：未评定（合成回归、启发式菜单指标和少量性能请求不足以校准总分）",
         "",
-        "## 分项诊断",
+        "## 分项回归结果",
         "",
-        "| 分项 | 得分 |",
-        "|---|---:|",
+        "| 分项 | 已测 | 通过 | 失败 |",
+        "|---|---:|---:|---:|",
     ]
     labels = {
         "basic": "基础推荐",
@@ -869,9 +857,12 @@ def _render_markdown(report: dict[str, Any]) -> str:
         "interaction": "多轮交互",
         "performance": "性能",
     }
-    for key in ("basic", "complex", "interaction", "performance"):
-        score = summary["rubric_scores"][key]
-        lines.append(f"| {labels[key]} | {score if score is not None else '不计分'} |")
+    for key in RUBRICS:
+        result = summary.get("rubric_results", {}).get(key, {})
+        lines.append(
+            f"| {labels[key]} | {result.get('cases', 0)} | "
+            f"{result.get('passed', 0)} | {result.get('failed', 0)} |"
+        )
     quality = summary.get("menu_quality")
     if quality:
         measured = quality["menus_measured"] > 0

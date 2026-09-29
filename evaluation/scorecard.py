@@ -1,9 +1,4 @@
-"""Build a strict, auditable scorecard from existing evaluation reports.
-
-The scorecard never invents a score.  It preserves the regression harness's
-internal diagnostic score, then separately decides whether the evidence is
-complete enough for that score to be used as an acceptance signal.
-"""
+"""Build an auditable evidence card without conflating regression with quality."""
 
 from __future__ import annotations
 
@@ -80,16 +75,30 @@ def _gate(name: str, status: GateStatus, evidence: dict[str, Any]) -> dict[str, 
 def _regression_gate(report: dict[str, Any]) -> dict[str, Any]:
     summary = report.get("summary") or {}
     dataset = report.get("dataset") or {}
+    cases = report.get("cases") or []
     reported = int(summary.get("cases", 0))
     expected = int(dataset.get("case_count", reported))
     passed = int(summary.get("passed", 0))
     failed = int(summary.get("failed", max(0, reported - passed)))
-    complete = expected > 0 and reported == expected and passed + failed == reported
+    observed = len(cases)
+    observed_passed = sum(case.get("passed") is True for case in cases)
+    complete = (
+        expected > 0
+        and reported == expected == observed
+        and passed == observed_passed
+        and failed == observed - observed_passed
+    )
     successful = complete and failed == 0
     return _gate(
         "functional_regression",
         "pass" if successful else "fail",
-        {"expected": expected, "reported": reported, "passed": passed, "failed": failed},
+        {
+            "expected": expected,
+            "reported": reported,
+            "observed": observed,
+            "passed": passed,
+            "failed": failed,
+        },
     )
 
 
@@ -109,12 +118,24 @@ def _performance_gate(report: dict[str, Any]) -> dict[str, Any]:
     statuses = {
         metric: (performance.get(metric) or {}).get("status") for metric in PERFORMANCE_METRICS
     }
+    latency_ms = {
+        metric: {
+            "mean": (performance.get(metric) or {}).get("mean_ms"),
+            "p95": (performance.get(metric) or {}).get("p95_ms"),
+        }
+        for metric in PERFORMANCE_METRICS
+    }
     valid = performance.get("threshold_result_valid") is True
     acceptable = valid and all(value in SAFE_PERFORMANCE_STATUSES for value in statuses.values())
     return _gate(
         "performance",
         "pass" if acceptable else "fail",
-        {"threshold_result_valid": valid, "counts": counts, "statuses": statuses},
+        {
+            "threshold_result_valid": valid,
+            "counts": counts,
+            "statuses": statuses,
+            "latency_ms": latency_ms,
+        },
     )
 
 
@@ -150,7 +171,7 @@ def build_scorecard(
     regression_report: dict[str, Any],
     private_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a gate-aware self-assessment from regression and private reports."""
+    """Create gate and quality evidence without assigning an uncalibrated grade."""
     cases = regression_report.get("cases")
     if not isinstance(cases, list):
         raise ValueError("Regression report must contain a cases list")
@@ -169,22 +190,29 @@ def build_scorecard(
     ]
     private_required = private_report is not None
     status = _overall_status(gates, private_required=private_required)
-    diagnostic_score = summary.get("diagnostic_score")
-    score_valid = (
-        status == "pass"
-        and summary.get("diagnostic_score_valid") is True
-        and isinstance(diagnostic_score, int | float)
-    )
+    rubric_results: dict[str, dict[str, int]] = {}
+    for rubric in ("basic", "complex", "interaction"):
+        selected = [case for case in cases if case.get("rubric") == rubric]
+        passed = sum(case.get("passed") is True for case in selected)
+        rubric_results[rubric] = {
+            "cases": len(selected),
+            "passed": passed,
+            "failed": len(selected) - passed,
+        }
     return {
-        "schema_version": "self-assessment-v1",
+        "schema_version": "self-assessment-v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "score_kind": "internal_diagnostic_not_official",
+        "assessment_kind": "regression_and_quality_evidence_not_official",
         "acceptance_status": status,
-        "score_valid": score_valid,
-        "validated_score": diagnostic_score if score_valid else None,
-        "observed_diagnostic_score": diagnostic_score,
-        "functional_score": summary.get("functional_score"),
-        "rubric_scores": summary.get("rubric_scores", {}),
+        "score_valid": False,
+        "validated_score": None,
+        "quality_score_status": "unscored_unvalidated",
+        "quality_score_reason": (
+            "Synthetic case passes and heuristic menu observations do not calibrate "
+            "expert quality, per-person nutrition, or unseen-case performance."
+        ),
+        "rubric_results": rubric_results,
+        "menu_quality": summary.get("menu_quality"),
         "quality_gates": gates,
         "evidence": {
             "dataset": regression_report.get("dataset", {}),
@@ -192,7 +220,7 @@ def build_scorecard(
             "private_matrix_included": private_required,
         },
         "limitations": [
-            "Internal diagnostic evidence, not an official competition score.",
+            "No total recommendation-quality score is produced from pass/fail regression.",
             "Synthetic checks do not replace hidden tests or expert review.",
             "Private matrix uses reviewed intent fixtures and does not score model NLU.",
         ],
@@ -200,32 +228,45 @@ def build_scorecard(
 
 
 def render_markdown(scorecard: dict[str, Any]) -> str:
-    """Render a compact human-readable scorecard."""
-    score = scorecard["validated_score"]
+    """Render the evidence and make the absence of a quality grade explicit."""
     lines = [
-        "# 一体化自测评分卡",
+        "# 一体化自测证据卡",
         "",
-        "> 本评分仅用于内部版本比较，不是评委官方成绩。",
+        "> 仅用于内部回归与版本比较，不是评委官方成绩。",
         "",
-        f"- 接纳状态：**{scorecard['acceptance_status']}**",
-        f"- 有效内部总分：**{f'{score}/100' if score is not None else '未生成'}**",
-        f"- 已观测诊断分：{scorecard.get('observed_diagnostic_score')}",
-        f"- 功能诊断分：{scorecard.get('functional_score')}/70",
+        f"- 回归门禁状态：**{scorecard['acceptance_status']}**",
+        "- 推荐质量总分：**未评定**；用例全通过不等于质量满分。",
         "",
-        "## 分项得分",
+        "## 分项回归结果",
         "",
-        "| 分项 | 得分 |",
-        "|---|---:|",
+        "| 分项 | 已测 | 通过 | 失败 |",
+        "|---|---:|---:|---:|",
     ]
     labels = {
         "basic": "基础推荐",
         "complex": "复杂组合",
         "interaction": "多轮交互",
-        "performance": "性能",
     }
-    for key in ("basic", "complex", "interaction", "performance"):
-        value = scorecard.get("rubric_scores", {}).get(key)
-        lines.append(f"| {labels[key]} | {value if value is not None else '不计分'} |")
+    for key in ("basic", "complex", "interaction"):
+        result = scorecard.get("rubric_results", {}).get(key, {})
+        lines.append(
+            f"| {labels[key]} | {result.get('cases', 0)} | "
+            f"{result.get('passed', 0)} | {result.get('failed', 0)} |"
+        )
+    quality = scorecard.get("menu_quality")
+    if isinstance(quality, dict):
+        lines.extend(
+            [
+                "",
+                "## 菜单质量观察（不计分）",
+                "",
+                f"- 可测菜单：{quality.get('menus_measured', 0)}；"
+                f"不可计算：{quality.get('menus_unavailable', 0)}。",
+                f"- 平均食材重合度：{quality.get('mean_ingredient_overlap')}；"
+                f"平均最相似菜品对：{quality.get('mean_worst_pair_overlap')}。",
+                "- 此指标仅比较源菜谱中的食材名称，不衡量营养或评委主观搭配质量。",
+            ]
+        )
     lines.extend(["", "## 质量门禁", "", "| 门禁 | 状态 | 证据 |", "|---|---|---|"])
     for gate in scorecard["quality_gates"]:
         evidence = json.dumps(gate["evidence"], ensure_ascii=False, separators=(",", ":"))
@@ -235,9 +276,9 @@ def render_markdown(scorecard: dict[str, Any]) -> str:
             "",
             "## 解释",
             "",
-            "- `pass`：所有必需证据完整且门禁通过，可用于内部版本接纳。",
+            "- `pass`：已配置的必需回归门禁通过，不代表推荐质量满分。",
             "- `fail`：存在功能、硬约束、真实性、性能或私有矩阵失败。",
-            "- `incomplete`：缺少性能或关键核验，观察分不能视为有效总分。",
+            "- `incomplete`：缺少性能或关键核验；无论门禁状态如何都不生成质量总分。",
             "",
         ]
     )
