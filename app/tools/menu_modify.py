@@ -12,5 +12,13 @@ class MenuModifyTool:
         self, candidates: list[Recipe], constraints: Constraints,
         current: list[Recipe] | None = None, replace_slot: int | None = None,
         reject_ids: set[str] | None = None,
+        query_terms: list[str] | None = None,
     ) -> PlanResult:
-        return self.planner.plan(candidates, constraints, current, replace_slot, reject_ids)
+        return self.planner.plan(
+            candidates,
+            constraints,
+            current=current,
+            replace_slot=replace_slot,
+            reject_ids=reject_ids,
+            query_terms=query_terms,
+        )

@@ -214,3 +214,123 @@ def test_three_dish_menu_prefers_complement_to_repeated_protein():
     assert result.failure is None
     assert "vegetable" in {item.recipe_id for item in result.recipes}
     assert sum("protein" in item.categories for item in result.recipes) <= 1
+
+
+def test_equal_fit_menu_prefers_distinct_source_ingredients_without_replacing_confirmed_slot() -> None:
+    protein = recipe("protein", "鸡蛋", "protein")
+    protein.methods = ["蒸"]
+    overlapping = recipe("overlap", "鸡蛋青菜", "vegetable")
+    overlapping.ingredients = [
+        Ingredient(raw="鸡蛋", name="鸡蛋"), Ingredient(raw="青菜", name="青菜")
+    ]
+    overlapping.methods = ["炒"]
+    distinct = recipe("distinct", "西兰花", "vegetable")
+    distinct.methods = ["炒"]
+    planner = MenuPlanner(RuleEngine())
+
+    result = planner.plan(
+        [protein, overlapping, distinct], Constraints(dish_count=2), current=[protein]
+    )
+
+    assert result.failure is None
+    assert [item.recipe_id for item in result.recipes] == ["protein", "distinct"]
+    assert [item["slot"] for item in result.changes] == [2]
+    repeated = planner.plan(
+        [protein, overlapping, distinct], Constraints(dish_count=2), current=[protein]
+    )
+    assert [item.recipe_id for item in repeated.recipes] == ["protein", "distinct"]
+
+
+def test_initial_menu_uses_distinct_protein_when_role_and_relevance_are_equal() -> None:
+    vegetable = recipe("vegetable", "青菜")
+    vegetable.ingredients.append(Ingredient(raw="鸡蛋", name="鸡蛋"))
+    vegetable.methods = ["炒"]
+    repeated = recipe("repeated", "鸡蛋", "protein")
+    repeated.methods = ["蒸"]
+    distinct = recipe("distinct", "豆腐", "protein")
+    distinct.methods = ["蒸"]
+    staple = recipe("staple", "米饭", "staple")
+    staple.methods = ["煮"]
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [vegetable, repeated, distinct, staple], Constraints(dish_count=3)
+    )
+
+    assert result.failure is None
+    assert [item.recipe_id for item in result.recipes] == [
+        "vegetable", "distinct", "staple",
+    ]
+
+
+def test_explicit_query_relevance_beats_diversity_for_equal_fit_candidates() -> None:
+    protein = recipe("protein", "鸡蛋", "protein")
+    protein.methods = ["蒸"]
+    requested = recipe("requested", "鸡蛋青菜", "vegetable")
+    requested.ingredients = [
+        Ingredient(raw="鸡蛋", name="鸡蛋"), Ingredient(raw="青菜", name="青菜")
+    ]
+    requested.methods = ["炒"]
+    distinct = recipe("distinct", "西兰花", "vegetable")
+    distinct.methods = ["炒"]
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [protein, distinct, requested], Constraints(dish_count=2),
+        current=[protein], query_terms=["鸡蛋"],
+    )
+
+    assert result.failure is None
+    assert [item.recipe_id for item in result.recipes] == ["protein", "requested"]
+
+
+def test_relevance_is_checked_before_bounding_similarity_pool() -> None:
+    protein = recipe("protein", "鸡蛋", "protein")
+    vegetables = [recipe(f"v{index}", f"青菜{index}") for index in range(70)]
+    requested = recipe("requested", "菠菜")
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [protein, *vegetables, requested], Constraints(dish_count=2),
+        current=[protein], query_terms=["菠菜"],
+    )
+
+    assert result.failure is None
+    assert [item.recipe_id for item in result.recipes] == ["protein", "requested"]
+
+
+def test_diversity_does_not_reintroduce_forbidden_candidate() -> None:
+    protein = recipe("protein", "鸡蛋", "protein")
+    protein.methods = ["蒸"]
+    safe = recipe("safe", "鸡蛋青菜", "vegetable")
+    safe.ingredients = [
+        Ingredient(raw="鸡蛋", name="鸡蛋"), Ingredient(raw="青菜", name="青菜")
+    ]
+    safe.methods = ["炒"]
+    unsafe = recipe("unsafe", "虾", "vegetable")
+    unsafe.methods = ["炒"]
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [protein, safe, unsafe], Constraints(dish_count=2, allergies=["海鲜"]),
+        current=[protein],
+    )
+
+    assert result.failure is None
+    assert [item.recipe_id for item in result.recipes] == ["protein", "safe"]
+
+
+def test_name_similarity_breaks_tie_only_after_source_ingredient_and_method_match() -> None:
+    protein = recipe("protein", "豆腐", "protein")
+    protein.name = "清蒸豆腐"
+    protein.methods = ["蒸"]
+    similar_name = recipe("similar", "青菜", "vegetable")
+    similar_name.name = "豆腐风味青菜"
+    similar_name.methods = ["炒"]
+    distinct_name = recipe("distinct", "青菜", "vegetable")
+    distinct_name.name = "蒜蓉青菜"
+    distinct_name.methods = ["炒"]
+
+    result = MenuPlanner(RuleEngine()).plan(
+        [protein, similar_name, distinct_name],
+        Constraints(dish_count=2), current=[protein],
+    )
+
+    assert result.failure is None
+    assert [item.recipe_id for item in result.recipes] == ["protein", "distinct"]
