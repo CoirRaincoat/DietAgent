@@ -155,6 +155,6 @@ Remove-Item Env:E2E_LIVE
 
 真实健康档案与原始对话未改动、不公开上传；`.env`、`.venv/`、node_modules/、runtime/、artifacts/、构建及浏览器测试产物均被忽略。
 
-查看 [v0.3.0 交付报告](docs/DEMO_V030_REPORT.md)、[前端架构](docs/FRONTEND_ARCHITECTURE.md)、[演示流程](docs/DEMO_FLOW.md)、[API](docs/API.md)、[合成回归](docs/REGRESSION.md)、[流式性能验收](docs/PERFORMANCE.md)、[真实数据报告](evaluation/REAL_DATA_REPORT.md) 和 [开发日志](docs/DEVELOPMENT_LOG.md)。后续 Phase 11 聚焦模型理解能力评测与比赛材料整理。
+查看 [v0.3.0 交付报告](docs/DEMO_V030_REPORT.md)、[前端架构](docs/FRONTEND_ARCHITECTURE.md)、[演示流程](docs/DEMO_FLOW.md)、[API](docs/API.md)、[合成回归](docs/REGRESSION.md)、[流式性能验收](docs/PERFORMANCE.md)、[独立 AI 双盲评审](docs/AI_JUDGE.md)、[真实数据报告](evaluation/REAL_DATA_REPORT.md) 和 [开发日志](docs/DEVELOPMENT_LOG.md)。后续 Phase 11 聚焦模型理解能力评测与比赛材料整理。
 
 公开发布使用独立干净快照，排除私有数据与含私有数据的历史，见 [公开发布说明](docs/PUBLICATION.md)。
