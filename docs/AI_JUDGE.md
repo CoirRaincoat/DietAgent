@@ -54,3 +54,57 @@ JUDGE_TIMEOUT_SECONDS=90
 重点查看候选胜、基线胜、平局、顺序不一致的数量和逐场景证据。顺序一致率低说明裁判不稳定，应更换裁判模型、调整量表或进行人工复核，而不是采用均值掩盖分歧。
 
 首次启用时，应抽取一部分场景进行人工盲评，并比较人工与裁判的一致率。未经过人工校准的裁判结果只能作为研发诊断证据。
+
+## 人工校准闭环
+
+### 1. 生成匿名 A/B 评审包
+
+使用与 AI Judge 相同的基线和候选回归报告：
+
+```powershell
+.\scripts\run_judge_calibration.ps1 `
+  -Mode Prepare `
+  -BaselineReport "C:\path\to\baseline\report.json" `
+  -CandidateReport "C:\path\to\candidate\report.json"
+```
+
+脚本生成：
+
+- `human_review_packet.jsonl`：匿名 A/B 回答，交给评审员；
+- `human_labels.csv`：人工填写 `A`、`B` 或 `tie`；
+- `HUMAN_REVIEW.md`：评审说明，交给评审员；
+- `human_blinding_key.json`：解盲映射，评审结束前不要交给评审员。
+
+无法判断的场景保持 `winner` 为空，不应强迫人工选择胜者。评审员不能查看解盲文件，也不应知道哪个版本是候选版本。
+
+### 2. 计算 AI 与人工一致性
+
+人工完成 `human_labels.csv` 后执行：
+
+```powershell
+.\scripts\run_judge_calibration.ps1 `
+  -Mode Evaluate `
+  -JudgeReport "C:\path\to\ai-judge\report.json" `
+  -ReviewDir "C:\path\to\human-review"
+```
+
+校准报告包含：
+
+- 人工标注覆盖率；
+- AI 可比较率与顺序不一致弃权数；
+- 完全一致率；
+- Cohen’s κ；
+- 人工 × AI 混淆矩阵；
+- 分歧和弃权场景明细。
+
+默认诊断阈值为至少 5 个有效场景、完全一致率不低于 70%、κ 不低于 0.4。阈值会原样记录在报告中，可以通过 `-MinCases`、`-MinAgreement` 和 `-MinKappa` 调整。达到阈值不代表获得官方认可，只表示这批样本没有观察到明显的人机校准问题。
+
+状态解释：
+
+- `insufficient_human_labels`：人工有效样本不足；
+- `excessive_judge_abstention`：AI 双顺序结果不稳定，可比较样本不足；
+- `kappa_unavailable`：标签分布单一，κ 无法计算；
+- `calibration_below_threshold`：一致性低于声明阈值；
+- `calibration_thresholds_met`：本批样本达到声明阈值。
+
+AI 双顺序结论不一致时按弃权处理，不使用均值或强制胜负掩盖不稳定性。
