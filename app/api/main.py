@@ -28,6 +28,7 @@ from app.infrastructure.llm.deepseek import DeepSeekLLM
 from app.infrastructure.sessions import SessionConflict, SessionStore
 from app.infrastructure.settings import Settings
 from app.infrastructure.synthetic import load_synthetic_catalog
+from app.retrieval.core import RecipeRetriever, RetrievalUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ def create_app(
     llm: BaseLLM | None = None,
     catalog: DataCatalog | None = None,
     store: SessionStore | None = None,
+    *, retriever: RecipeRetriever | None = None,
 ) -> FastAPI:
     config = settings or Settings()
 
@@ -76,7 +78,7 @@ def create_app(
             timeout_seconds=config.llm_timeout_seconds,
         )
         application.state.agent = MealAgent(
-            data, store or SessionStore(config.database_path), provider
+            data, store or SessionStore(config.database_path), provider, retriever=retriever,
         )
         application.state.capacity = asyncio.Semaphore(8)
         try:
@@ -116,6 +118,16 @@ def create_app(
     @application.exception_handler(OpenAIRequestError)
     async def openai_error_handler(_: Request, error: OpenAIRequestError) -> JSONResponse:
         return JSONResponse(status_code=error.status_code, content=error_body(error))
+
+    @application.exception_handler(RetrievalUnavailable)
+    async def retrieval_error_handler(request: Request, _: RetrievalUnavailable) -> JSONResponse:
+        message = "菜谱检索暂不可用，当前限制仍然保留，请稍后重试。"
+        if request.url.path == "/v1/chat/completions":
+            error = OpenAIRequestError(503, message, "retrieval_unavailable", error_type="server_error")
+            return JSONResponse(status_code=503, content=error_body(error))
+        return JSONResponse(status_code=503, content={
+            "detail": {"code": "RETRIEVAL_UNAVAILABLE", "message": message},
+        })
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(

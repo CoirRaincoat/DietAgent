@@ -40,3 +40,7 @@ test-results/
 /docs/problem.docx
 /docs/references/
 /prompt/
+
+# Local evaluator packages and their raw results are not public source.
+/DietAgent_judge_eval/
+/judge-results/

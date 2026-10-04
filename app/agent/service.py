@@ -56,6 +56,7 @@ from app.domain.models import (
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.sessions import SessionStore
+from app.retrieval.core import RecipeRetriever
 from app.retrieval.keyword import KeywordRetriever
 from app.rules.engine import RuleEngine, compact
 from app.tools.health_check import HealthCheckTool
@@ -78,12 +79,15 @@ def _merge(current: list[str], added: list[str]) -> list[str]:
 
 
 class MealAgent:
-    def __init__(self, catalog: DataCatalog, store: SessionStore, llm: BaseLLM):
+    def __init__(
+        self, catalog: DataCatalog, store: SessionStore, llm: BaseLLM,
+        *, retriever: RecipeRetriever | None = None,
+    ):
         self.catalog = catalog
         self.store = store
         self.llm = llm
         self.rules = RuleEngine()
-        self.retriever = KeywordRetriever(catalog.recipes.values())
+        self.retriever = retriever if retriever is not None else KeywordRetriever(catalog.recipes.values())
         self.planner = MenuPlanner(self.rules)
         self._locks: dict[str, asyncio.Lock] = {}
         self.health_tool = HealthCheckTool(self.rules)
@@ -498,7 +502,7 @@ class MealAgent:
 
     async def _plan(
         self, state: SessionState, intent: Intent, previous_ids: list[str],
-        events: list[ToolEvent], previous_state: SessionState,
+        events: list[ToolEvent], previous_state: SessionState | None = None,
     ) -> ChatResult:
         started = perf_counter()
         constraints = state.constraints
@@ -623,7 +627,9 @@ class MealAgent:
         facts["nutrition"] = (
             "营养说明基于食材和做法作定性分析，未计算热量、蛋白质、糖或钠的精确含量。"
         )
-        operation_facts = state_change_facts(intent, previous_state, state)
+        operation_facts = (
+            state_change_facts(intent, previous_state, state) if previous_state is not None else {}
+        )
         if "operation" in operation_facts:
             facts["opening"] = operation_facts.pop("operation")
         elif "restore" in operation_facts or "constraint_restore" in operation_facts:

@@ -1,11 +1,11 @@
 """Recipe retrieval tool; never manufactures catalog records."""
 
 from app.domain.models import Constraints, Recipe
-from app.retrieval.keyword import KeywordRetriever
+from app.retrieval.core import RecipeRetriever
 
 
 class RecipeSearchTool:
-    def __init__(self, retriever: KeywordRetriever):
+    def __init__(self, retriever: RecipeRetriever):
         self.retriever = retriever
 
     def __call__(
