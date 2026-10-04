@@ -240,6 +240,13 @@ class DeepSeekLLM(BaseLLM):
             raise _OutputViolation("revoke_confirmed", "invalid_semantics")
         if intent.restore_constraints and intent.dish_count is not None:
             raise _OutputViolation("restore_constraints", "invalid_semantics")
+        if intent.restore_menu is not None:
+            if intent.action != "plan":
+                raise _OutputViolation("restore_menu", "invalid_semantics")
+            if intent.dish_count is not None or intent.restore_constraints:
+                raise _OutputViolation("restore_menu", "invalid_semantics")
+            if intent.replace_slot is not None or intent.replace_name is not None:
+                raise _OutputViolation("restore_menu", "invalid_semantics")
         for update in intent.diner_updates:
             if update.no_spicy is False:
                 raise _OutputViolation("diner_updates", "invalid_semantics")

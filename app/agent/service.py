@@ -26,6 +26,7 @@ from app.agent.diners import (
 )
 from app.agent.history_restore import apply_constraint_restore
 from app.agent.menu_balance import analyze_menu_balance, balance_summary
+from app.agent.menu_restore import apply_menu_restore, record_menu_revision, record_rejection_action
 from app.agent.planner import MenuPlanner, PlanResult
 from app.agent.revoke_exclusion import apply_revoke_exclusion
 from app.agent.suggestions import replacement_candidates
@@ -130,6 +131,7 @@ class MealAgent:
             previous_ids = list(state.menu_ids)
             if intent.action == "reject":
                 # Save explicit rejection before clarification/planning can fail.
+                record_rejection_action(state, previous_ids)
                 state.rejected_recipe_ids = _merge(state.rejected_recipe_ids, previous_ids)
             issue = self._apply_intent(state, intent, message)
             state.revision += 1
@@ -289,6 +291,11 @@ class MealAgent:
         questions = missing_questions(state)
         if questions:
             return "规划前还需要确认：" + " ".join(question.prompt for question in questions)
+        menu_restore_issue = apply_menu_restore(
+            state, intent, self.rules, self.catalog.recipes
+        )
+        if menu_restore_issue:
+            return menu_restore_issue
         return None
 
     def _apply_diner_allergy_clarifications(
@@ -498,6 +505,7 @@ class MealAgent:
             )
         current = [self.catalog.recipes[key] for key in previous_ids if key in self.catalog.recipes]
         replace_slot = intent.replace_slot
+        restored = intent.restore_menu is not None
         if intent.action == "replace":
             if not current:
                 return self._unresolved(
@@ -514,7 +522,20 @@ class MealAgent:
                 return self._unresolved(
                     state, "请说明要换第几道菜。", "clarification_required", events
                 )
-        if intent.action == "explain":
+        if restored:
+            # apply_menu_restore already revalidated these IDs and put them on
+            # state.menu_ids. Restore the exact menu, never a re-planned one.
+            chosen = [
+                self.catalog.recipes[rid] for rid in state.menu_ids if rid in self.catalog.recipes
+            ]
+            if len(chosen) != len(state.menu_ids) or len({recipe.recipe_id for recipe in chosen}) != len(chosen):
+                return self._unresolved(
+                    state, "历史菜单中的菜品当前已不可用，无法恢复原菜单。",
+                    "clarification_required", events,
+                )
+            planning = PlanResult(recipes=chosen, changes=[], warnings=[], failure=None)
+            safe = []
+        elif intent.action == "explain":
             verified_current = self.tools.call(
                 "health_check", events, recipes=current, constraints=constraints,
             )
@@ -575,12 +596,20 @@ class MealAgent:
         state.menu_valid = True
         state.pending_clarification = None
         state.pending_fields = []
+        record_menu_revision(
+            state, chosen_ids, source="restored_menu" if restored else "planned_menu"
+        )
         facts = {
             "catalog": "本餐菜品均来自方太菜谱库，可通过 recipe_id 查到具体食材与步骤。",
             "constraints": "已按当前已知过敏、排除食材与明确要求执行规则检查。",
             "balance": balance_summary(menu_balance),
             "nutrition": "营养说明基于食材和做法作定性分析，未计算热量、蛋白质、糖或钠的精确含量。",
         }
+        if restored:
+            facts["restore"] = (
+                "已按你的要求恢复此前那桌菜单，并仅撤销与之对应的那次拒绝记录；"
+                "后来新增的过敏、忌口与要求仍然保留。"
+            )
         active_diners = confirmed_attendees(state.diners)
         if any(diner.attendance and is_unlinked_profile(diner) for diner in state.diners):
             facts["profile_scope"] = (
@@ -604,7 +633,7 @@ class MealAgent:
                 "逐人适配：" + "、".join(diner_facts)
                 + "的已知硬约束均已按共享菜单核对；未提供信息保持未知。"
             )
-        if previous_ids:
+        if previous_ids and not restored:
             kept = sum(old == new for old, new in zip(previous_ids, chosen_ids))
             facts["changes"] = (
                 f"与上一版相比，保留原位置上的 {kept} 道菜，其余按本轮要求重新选择。"
@@ -635,6 +664,8 @@ class MealAgent:
                 required_facts.append("profile_scope")
             if "diners" in facts:
                 required_facts.append("diners")
+            if "restore" in facts:
+                required_facts.append("restore")
             selected = list(dict.fromkeys(required_facts + selected + ["nutrition"]))
             reason = "\n".join(facts[key] for key in selected)
         except (LLMUnavailable, LLMOutputError, ValueError):

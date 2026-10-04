@@ -115,6 +115,16 @@ class RestoreConstraint(DomainModel):
     reference: Literal["original"] = "original"
 
 
+class RestoreMenuIntent(DomainModel):
+    """A menu-level request to restore an earlier menu snapshot (J18).
+
+    The model only names which menu it wants; it never guesses recipe IDs. The
+    resolver looks the menu up from recorded history and revalidates it.
+    """
+
+    reference: Literal["original"] = "original"
+
+
 class Intent(DomainModel):
     action: Literal["plan", "replace", "reject", "explain", "clarify"] = "plan"
     excluded_ingredients: list[str] = Field(default_factory=list)
@@ -125,6 +135,7 @@ class Intent(DomainModel):
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     diner_updates: list[DinerUpdate] = Field(default_factory=list, max_length=8)
     restore_constraints: list[RestoreConstraint] = Field(default_factory=list, max_length=4)
+    restore_menu: RestoreMenuIntent | None = None
     preferred_ingredients: list[str] = Field(default_factory=list)
     health_goals: list[str] = Field(default_factory=list)
     preferences: list[str] = Field(default_factory=list)
@@ -183,6 +194,25 @@ class ConstraintRevision(DomainModel):
     source: Literal["explicit_user"] = "explicit_user"
 
 
+class MenuRevision(DomainModel):
+    """One valid menu version actually generated and returned to the user."""
+
+    revision_id: str
+    turn_index: int
+    recipe_ids: list[str]
+    source: Literal["planned_menu", "restored_menu"] = "planned_menu"
+
+
+class RejectionAction(DomainModel):
+    """One whole-menu rejection, recording only the newly rejected delta."""
+
+    action_id: str
+    turn_index: int
+    rejected_recipe_ids: list[str]
+    source_menu_revision_id: str | None = None
+    active: bool = True
+
+
 class SessionState(DomainModel):
     session_id: str
     user_id: int
@@ -204,6 +234,10 @@ class SessionState(DomainModel):
     last_message: str = ""
     history: list[dict[str, str]] = Field(default_factory=list)
     constraint_history: list[ConstraintRevision] = Field(default_factory=list)
+    # Menu version snapshots and per-rejection deltas support scoped restore
+    # (J18). They are separate from J17's field-scoped constraint_history.
+    menu_history: list[MenuRevision] = Field(default_factory=list)
+    rejection_actions: list[RejectionAction] = Field(default_factory=list)
     confirmed_fields: list[Literal["people", "meal_type", "restrictions"]] = Field(
         default_factory=list
     )
