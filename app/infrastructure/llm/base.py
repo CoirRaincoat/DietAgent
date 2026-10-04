@@ -41,7 +41,7 @@ class LLMOutputError(LLMUnavailable):
         "preferred_ingredients", "health_goals", "preferences", "inventory", "no_spicy",
         "meal_type", "dish_count", "soup_count", "people", "restrictions_confirmed",
         "max_minutes", "clear_time_limit", "replace_slot", "replace_name", "query_terms",
-        "clarification", "reason_ids",
+        "clarification", "reason_ids", "restore_constraints",
     }
 
     def __init__(

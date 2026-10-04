@@ -1,5 +1,6 @@
 """Keep contradictory count requests separate from verified meal constraints."""
 
+from app.agent.history_restore import record_constraint_revision
 from app.domain.models import Intent, PendingMenuCounts, SessionState
 
 
@@ -29,4 +30,6 @@ def apply_menu_counts(state: SessionState, intent: Intent) -> str | None:
     constraints.dish_count = dish_count
     constraints.soup_count = soup_count
     state.pending_menu_counts = None
+    if intent.dish_count is not None:
+        record_constraint_revision(state, "dish_count", dish_count)
     return None

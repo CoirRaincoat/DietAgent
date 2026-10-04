@@ -238,6 +238,8 @@ class DeepSeekLLM(BaseLLM):
             raise _OutputViolation("diner_updates", "out_of_range")
         if intent.revoke_confirmed and intent.revoke_cancelled:
             raise _OutputViolation("revoke_confirmed", "invalid_semantics")
+        if intent.restore_constraints and intent.dish_count is not None:
+            raise _OutputViolation("restore_constraints", "invalid_semantics")
         for update in intent.diner_updates:
             if update.no_spicy is False:
                 raise _OutputViolation("diner_updates", "invalid_semantics")

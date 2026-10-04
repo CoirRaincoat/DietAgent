@@ -24,6 +24,7 @@ from app.agent.diners import (
     is_unlinked_profile,
     profile_diner,
 )
+from app.agent.history_restore import apply_constraint_restore
 from app.agent.menu_balance import analyze_menu_balance, balance_summary
 from app.agent.planner import MenuPlanner, PlanResult
 from app.agent.revoke_exclusion import apply_revoke_exclusion
@@ -158,6 +159,7 @@ class MealAgent:
         state.meal_constraints = meal_constraints
         constraints = meal_constraints
         count_issue = apply_menu_counts(state, intent)
+        restore_issue = apply_constraint_restore(state, intent)
         revoke_issue = apply_revoke_exclusion(state, intent, message)
         confirm_from_intent(state, intent, message)
         repair_proven_reference_pending(state)
@@ -278,6 +280,8 @@ class MealAgent:
             return revoke_issue
         if count_issue:
             return count_issue
+        if restore_issue:
+            return restore_issue
         if state.constraints.soup_count > state.constraints.dish_count:
             return "汤的数量不能超过总菜数，请明确总共几道，其中几道汤。"
         if intent.action == "clarify" or intent.clarification:

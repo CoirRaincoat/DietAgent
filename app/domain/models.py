@@ -108,6 +108,13 @@ class Constraints(DomainModel):
     max_minutes: int | None = Field(default=None, ge=1, le=480)
 
 
+class RestoreConstraint(DomainModel):
+    """A field-scoped request to restore an earlier explicit constraint value."""
+
+    field: Literal["dish_count"]
+    reference: Literal["original"] = "original"
+
+
 class Intent(DomainModel):
     action: Literal["plan", "replace", "reject", "explain", "clarify"] = "plan"
     excluded_ingredients: list[str] = Field(default_factory=list)
@@ -117,6 +124,7 @@ class Intent(DomainModel):
     allergies: list[str] = Field(default_factory=list)
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     diner_updates: list[DinerUpdate] = Field(default_factory=list, max_length=8)
+    restore_constraints: list[RestoreConstraint] = Field(default_factory=list, max_length=4)
     preferred_ingredients: list[str] = Field(default_factory=list)
     health_goals: list[str] = Field(default_factory=list)
     preferences: list[str] = Field(default_factory=list)
@@ -166,6 +174,15 @@ class PendingRevokeExclusion(DomainModel):
     targets: list[str] = Field(default_factory=list, max_length=30)
 
 
+class ConstraintRevision(DomainModel):
+    """One explicitly confirmed value of a restorable constraint field."""
+
+    field: str
+    value: int
+    turn_index: int
+    source: Literal["explicit_user"] = "explicit_user"
+
+
 class SessionState(DomainModel):
     session_id: str
     user_id: int
@@ -186,6 +203,7 @@ class SessionState(DomainModel):
     pending_revoke_exclusion: PendingRevokeExclusion | None = None
     last_message: str = ""
     history: list[dict[str, str]] = Field(default_factory=list)
+    constraint_history: list[ConstraintRevision] = Field(default_factory=list)
     confirmed_fields: list[Literal["people", "meal_type", "restrictions"]] = Field(
         default_factory=list
     )
