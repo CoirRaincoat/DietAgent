@@ -27,6 +27,7 @@ export interface Constraints {
 export interface Diner {
   diner_id: string; display_name: string; aliases: string[]; attendance: boolean; profile_owner: boolean;
   participation_basis?: 'explicit' | 'profile_unlinked' | 'legacy';
+  pending_allergy?: boolean; pending_allergy_terms?: string[];
   allergies: string[]; excluded_ingredients: string[]; preferred_ingredients: string[];
   preferences: string[]; health_goals: string[]; no_spicy: boolean;
 }
@@ -40,6 +41,10 @@ export interface SessionState {
   menu_ids: string[]; menu_valid: boolean; pending_allergy: boolean; pending_allergy_terms: string[];
   pending_menu_counts?: { dish_count: number; soup_count: number } | null;
   pending_revoke_exclusion?: { subject: string | null; targets: string[] } | null;
+  rejected_recipe_ids?: string[];
+  constraint_history?: { field: string; value: number; turn_index: number; source: 'explicit_user' }[];
+  menu_history?: { revision_id: string; turn_index: number; recipe_ids: string[]; source: 'planned_menu' | 'restored_menu' }[];
+  rejection_actions?: { action_id: string; turn_index: number; rejected_recipe_ids: string[]; source_menu_revision_id: string | null; active: boolean }[];
   pending_clarification: string | null; last_message: string; history: {role:string;content:string}[];
   confirmed_fields: string[]; pending_fields: string[];
 }

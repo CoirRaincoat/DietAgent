@@ -100,6 +100,7 @@ def apply_menu_restore(
     chosen = [recipes[rid] for rid in revision.recipe_ids]
     if (
         len(chosen) != state.constraints.dish_count
+        or len(set(revision.recipe_ids)) != len(revision.recipe_ids)
         or sum("soup" in recipe.categories for recipe in chosen) != state.constraints.soup_count
     ):
         return "历史菜单的菜数或汤数与当前要求不一致，无法直接恢复；请调整要求后重试。"
@@ -111,10 +112,11 @@ def apply_menu_restore(
             )
     # Undo exactly the rejection delta that rejected this menu revision.
     undo_ids: set[str] = set()
+    undo_actions = []
     for action in state.rejection_actions:
         if action.source_menu_revision_id == revision.revision_id and action.active:
             undo_ids.update(action.rejected_recipe_ids)
-            action.active = False
+            undo_actions.append(action)
     remaining = [rid for rid in state.rejected_recipe_ids if rid not in undo_ids]
     # A still-rejected dish must never re-enter the menu through another ID or
     # a same-name catalog row.
@@ -124,6 +126,9 @@ def apply_menu_restore(
     for recipe in chosen:
         if compact(recipe.name) in rejected_names:
             return "历史菜单中的菜品仍处于拒绝状态，无法恢复；请调整要求后重试。"
+    # Commit the entire undo only after every validation succeeds.
+    for action in undo_actions:
+        action.active = False
     state.rejected_recipe_ids = remaining
     state.menu_ids = list(revision.recipe_ids)
     return None
