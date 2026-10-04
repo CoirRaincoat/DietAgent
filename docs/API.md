@@ -1,5 +1,13 @@
 # 比赛 Demo API（v0.3.0）
 
+2026-10-05 融合版继续使用 `schema_version=2.0`。会话新增字段都有默认值，旧 SQLite 快照和请求缓存可继续读取；现有请求字段与 JSON/SSE 传输约定保持兼容。
+
+`conversation_state` 包含 `pending_menu_counts`、`pending_revoke_exclusion`、`constraint_history`、`menu_history`、`rejection_actions`；参餐者的 `participation_basis` 区分明确参餐与档案待关联。问题列表按本轮实际缺失字段生成，不依赖回复文案前缀。
+
+普通忌口撤销需要先提出目标，再明确确认或取消；过敏不可通过该路径删除。当前历史恢复只支持最初的总菜数、最初的整份菜单；两者范围独立，不恢复整个会话，不支持任意上一轮撤销。恢复菜单以原 recipe IDs 为准，并重新验证当前限制。
+
+成功解释必需包含已验证的本轮操作、当前要求、来源和定性营养边界；存在档案待关联或多人限制时保留对应事实。可选检索后端失败时 `/chat` 返回 HTTP 503 / `RETRIEVAL_UNAVAILABLE`，兼容入口返回 HTTP 503 / `retrieval_unavailable`；`stream=true` 也返回 JSON 错误，不能以空 SSE 成功掩盖失败。当前限制已保存，可稍后继续同一会话。
+
 默认服务仅加载 3 个手写合成画像与原始菜谱 CSV。原始健康档案和原始对话只用于本地验收；DeepSeek 适配器在发出请求前拒绝 `data_scope=original` 的画像。没有从 HTTP 传入或覆盖 data_scope 的接口。
 
 用户界面为 `http://localhost:8080`，演示页为 `/demo`；前端请求 `/api/` 前缀，由 Nginx 转发到以下原有 API。原 `/health`、`/chat`、`/demo/profiles`、`/docs` 兼容入口继续可用。评测方可调用 OpenAI Chat Completions 兼容入口 `/v1/chat/completions`。内部 `/chat` 响应 schema_version 仍为 2.0。
