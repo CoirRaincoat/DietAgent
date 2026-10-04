@@ -2,7 +2,11 @@
 
 import pytest
 
-from app.agent.clarification import confirm_from_intent, missing_questions
+from app.agent.clarification import (
+    confirm_from_intent,
+    missing_questions,
+    recover_explicit_meal_context,
+)
 from app.domain.models import Intent, SessionState
 
 
@@ -60,3 +64,41 @@ def test_no_answer_to_time_question_does_not_confirm_restrictions():
     value = state(confirmed_fields=["people", "meal_type"], pending_fields=["time_limit"])
     confirm_from_intent(value, Intent(restrictions_confirmed=True), "没有")
     assert "restrictions" not in value.confirmed_fields
+
+
+@pytest.mark.parametrize("message", [
+    "一个人想吃辣，一个人一点辣都不想碰",
+    "一个人吃素，另一个人正常吃",
+    "其中一人对花生过敏",
+    "有一个人不吃海鲜",
+    "另一个人想吃清淡",
+    "有一个人不喝酒",
+    "某个人不想吃辣",
+    "一个老人，一个小孩",
+])
+def test_per_member_description_is_not_recovered_as_party_size(message):
+    """Per-member attribute/distribution words are not the party total."""
+    assert recover_explicit_meal_context(Intent(), message).people is None
+
+
+@pytest.mark.parametrize("message", [
+    "今天就一个人吃饭",
+    "我一个人吃",
+    "只有我一个人",
+])
+def test_lone_person_assertion_still_recovers_single_party(message):
+    """An explicit 'alone' assertion is still a one-person party."""
+    assert recover_explicit_meal_context(Intent(), message).people == 1
+
+
+@pytest.mark.parametrize(("message", "expected"), [
+    ("我们一共两个人", 2),
+    ("两个人吃饭", 2),
+    ("总共3个人", 3),
+    ("今天四个人吃", 4),
+    ("我们有5个人", 5),
+    ("1人晚餐", 1),
+])
+def test_explicit_total_party_size_is_recovered(message, expected):
+    """Unambiguous total counts keep recovering, including Arabic '1人'."""
+    assert recover_explicit_meal_context(Intent(), message).people == expected

@@ -1,7 +1,9 @@
 """Stable participant state and deterministic shared-table aggregation."""
 
+import re
 from uuid import NAMESPACE_URL, uuid5
 
+from app.agent.clarification import asserted_context, conditional_context
 from app.domain.models import (
     Constraints,
     Diner,
@@ -50,23 +52,82 @@ def find_diner(diners: list[Diner], update: DinerUpdate) -> Diner | None:
 
 
 def profile_diner(profile: UserProfile) -> Diner:
-    """Create the profile owner's participant record without copying raw health data."""
+    """Retain profile facts without presuming a separate attendee identity."""
     return Diner(
         diner_id=f"profile-{profile.user_id}",
         display_name="用户",
         aliases=["用户", "我", "本人"],
         profile_owner=True,
+        participation_basis="profile_unlinked",
         allergies=list(profile.allergies),
         preferences=list(profile.preferences),
         health_goals=list(profile.health_goals),
     )
 
 
+def is_unlinked_profile(diner: Diner) -> bool:
+    """An account holder is not automatically an additional named attendee.
+
+    Old snapshots have no attendance provenance. Keep their profile facts in
+    shared checks, but do not invent either a person-to-slot link or absence.
+    """
+    return diner.profile_owner and diner.participation_basis != "explicit"
+
+
+def confirmed_attendees(diners: list[Diner]) -> list[Diner]:
+    """Return a lower bound of explicitly identified, attending people."""
+    return [diner for diner in diners if diner.attendance and not is_unlinked_profile(diner)]
+
+
+def effective_attendee_count(diners: list[Diner]) -> int:
+    return len(confirmed_attendees(diners))
+
+
+def _owner_attendance(message: str) -> bool | None:
+    """Recognize only first-person attendance declarations, not request ownership.
+
+    This bounded confirmation also covers legal intents that attribute only
+    relatives' constraints and omit a redundant update for the speaker.
+    """
+    if not asserted_context(message):
+        return None
+    decisions: set[bool] = set()
+    for clause in re.split(r"[，,。；;\n]", message):
+        if re.search(
+            r"[?？\"'“”‘’「」]|如果|假如|假设|要是|可能|不确定|是否|他说|她说|有人说"
+            r"|听说|转述|讨论|商量|想问",
+            clause,
+        ):
+            continue
+        normalized = compact(clause)
+        subject = r"(?:^|(?:但|而|还有|以及))(?:(?:今天|今晚|本餐|这次))?(?:我|本人)"
+        modifiers = r"(?:(?:今天|今晚|本餐|这次|也|会|要|仍|重新|再次|一起))*"
+        absent = re.search(subject + modifiers + r"(?:不|没有|不会|不再)(?:参加|参餐|用餐|吃饭)", normalized)
+        present = re.search(subject + modifiers + r"(?:参加|参餐|用餐|吃饭)", normalized)
+        shared = re.search(
+            r"^(?:今晚|今天|本餐|这次)?(?:我|本人)(?:和|与|跟|及|、).+"
+            r"(?:[一二三四五六七八两1-8](?:个)?人|吃饭|用餐|参餐|参加|[早午晚]餐)",
+            normalized,
+        )
+        we_eat = re.search(
+            r"^(?:今晚|今天|本餐|这次)?我们.{0,20}(?:人|个).{0,8}(?:吃|餐|参加)", normalized
+        )
+        plural_negative = re.search(r"(?:不|没|不会|不再)(?:参加|参餐|用餐|吃飯|吃饭)", normalized)
+        if absent:
+            decisions.add(False)
+        if present or ((shared or we_eat) and not plural_negative):
+            decisions.add(True)
+    if len(decisions) > 1:
+        raise DinerConflict("本人是否参加本餐的说法有冲突，请确认；不会猜测本人对应哪位用餐者。")
+    return next(iter(decisions)) if decisions else None
+
+
 def apply_diner_updates(
-    diners: list[Diner], updates: list[DinerUpdate], *, session_id: str
+    diners: list[Diner], updates: list[DinerUpdate], *, session_id: str, message: str = ""
 ) -> list[Diner]:
     """Apply attributed facts while retaining absent people and stable IDs."""
     result = [diner.model_copy(deep=True) for diner in diners]
+    conditional = conditional_context(message)
     for update in updates:
         diner = find_diner(result, update)
         if diner is None:
@@ -77,11 +138,16 @@ def apply_diner_updates(
                 display_name=update.diner.strip(),
                 aliases=[],
                 attendance=update.attendance is not False,
+                participation_basis="explicit",
             )
             result.append(diner)
 
         if update.attendance is not None:
-            diner.attendance = update.attendance
+            # A conditional/hypothetical "won't attend" is not a confirmed exit;
+            # keep the prior attendance so the profile's hard constraints survive.
+            if not (conditional and update.attendance is False):
+                diner.attendance = update.attendance
+                diner.participation_basis = "explicit"
         if update.no_spicy is False and diner.no_spicy:
             raise DinerConflict(
                 f"{diner.display_name}已有不吃辣的安全限制；如需纠正，请明确说明并走档案核对。"
@@ -97,6 +163,13 @@ def apply_diner_updates(
         diner.preferences = _merge(diner.preferences, update.preferences)
         diner.health_goals = _merge(diner.health_goals, update.health_goals)
 
+    owner_attendance = _owner_attendance(message)
+    if owner_attendance is not None:
+        for diner in result:
+            if diner.profile_owner:
+                diner.attendance = owner_attendance
+                diner.participation_basis = "explicit"
+
     if len(result) > 8:
         raise DinerConflict("当前单餐最多支持记录 8 位用餐者，请合并或减少成员后再规划。")
     for index, diner in enumerate(result):
@@ -110,7 +183,7 @@ def apply_diner_updates(
 
 
 def aggregate_constraints(meal: Constraints, diners: list[Diner]) -> Constraints:
-    """Aggregate all active diners' hard constraints for one shared menu."""
+    """Aggregate attendees plus unlinked profile facts until explicit absence."""
     aggregate = meal.model_copy(deep=True)
     for diner in diners:
         if not diner.attendance:
@@ -186,7 +259,12 @@ def diner_suitability(
                 known_constraints=_known_constraints(diner),
                 violations=violations,
                 unmet_preferences=unmet,
-                scope_note="仅按该用餐者已知信息核对；未提供的信息保持未知。",
+                scope_note=(
+                    "档案主体与本餐用餐者身份待关联；仅保守用于共享限制检查，"
+                    "不代表已确认参餐或已关联任一逐人身份。"
+                    if is_unlinked_profile(diner)
+                    else "仅按该用餐者已知信息核对；未提供的信息保持未知。"
+                ),
             )
         )
     return result

@@ -22,17 +22,46 @@ class _SelectedReasons(BaseModel):
     reason_ids: list[str] = Field(min_length=1, max_length=100)
 
 
+class _OutputViolation(ValueError):
+    """Internal taxonomy containing field names only, never rejected values."""
+
+    def __init__(self, field: str, category: str) -> None:
+        self.field = field
+        self.category = category
+        super().__init__(category)
+
+
+def _schema_error(error: ValidationError, stage: str) -> LLMOutputError:
+    detail = error.errors(include_input=False, include_context=False)[0]
+    location = detail.get("loc", ())
+    field = str(location[0]) if location else "unknown"
+    kind = detail.get("type", "")
+    if kind == "extra_forbidden":
+        field, category = "unknown", "unknown_field"
+    elif kind == "missing":
+        category = "missing_field"
+    elif kind.endswith("_type"):
+        category = "invalid_type"
+    elif kind in {"greater_than_equal", "less_than_equal", "too_long", "too_short"}:
+        category = "out_of_range"
+    elif field == "action" and kind == "literal_error":
+        category = "invalid_action"
+    else:
+        category = "schema_validation"
+    return LLMOutputError(stage=stage, field=field, category=category)
+
+
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError("Duplicate JSON key")
+            raise _OutputViolation("content", "duplicate_key")
         result[key] = value
     return result
 
 
 def _reject_json_constant(value: str) -> None:
-    raise ValueError("Invalid JSON number")
+    raise _OutputViolation("content", "invalid_json")
 
 
 class DeepSeekLLM(BaseLLM):
@@ -97,23 +126,37 @@ class DeepSeekLLM(BaseLLM):
             envelope = response.json()
             choices = envelope["choices"]
             if not isinstance(choices, list) or len(choices) != 1:
-                raise ValueError("Invalid choices")
+                raise _OutputViolation("choices", "invalid_envelope")
             choice = choices[0]
             if choice["finish_reason"] != "stop":
-                raise ValueError("Incomplete output")
+                raise _OutputViolation("finish_reason", "incomplete_output")
             content = choice["message"]["content"]
             if not isinstance(content, str) or not content.strip():
-                raise ValueError("Empty output")
+                raise _OutputViolation("content", "invalid_envelope")
+        except _OutputViolation as error:
+            raise LLMOutputError(
+                stage="response", field=error.field, category=error.category,
+            ) from None
+        except (ValueError, KeyError, TypeError, IndexError):
+            raise LLMOutputError(stage="response", category="invalid_envelope") from None
+
+        try:
             result = json.loads(
                 content,
                 object_pairs_hook=_unique_json_object,
                 parse_constant=_reject_json_constant,
             )
             if not isinstance(result, dict):
-                raise ValueError("Expected a JSON object")
+                raise _OutputViolation("content", "invalid_type")
             return result
-        except (ValueError, KeyError, TypeError, IndexError):
-            raise LLMOutputError() from None
+        except _OutputViolation as error:
+            raise LLMOutputError(
+                stage="response", field=error.field, category=error.category,
+            ) from None
+        except ValueError:
+            raise LLMOutputError(
+                stage="response", field="content", category="invalid_json",
+            ) from None
 
     async def parse(
         self, message: str, state: SessionState, profile: UserProfile
@@ -133,6 +176,9 @@ class DeepSeekLLM(BaseLLM):
             ],
             "menu_valid": state.menu_valid,
             "pending_clarification": getattr(state, "pending_clarification", None),
+            "pending_menu_counts": (
+                state.pending_menu_counts.model_dump() if state.pending_menu_counts else None
+            ),
             "recent_history": state.history[-6:],
             "profile": profile.model_dump(
                 include={"preferences", "allergies", "health_goals", "special_groups"}
@@ -144,7 +190,7 @@ class DeepSeekLLM(BaseLLM):
         result = await self._json_completion(prompt, payload)
         try:
             if "action" not in result:
-                raise ValueError("Missing action")
+                raise _OutputViolation("action", "missing_field")
             intent = Intent.model_validate(result, strict=True)
             self._validate_intent(intent, state)
             if (
@@ -159,10 +205,16 @@ class DeepSeekLLM(BaseLLM):
                 r"时间(?:不限制|不限|不作限制)|(?:取消|去掉|不设|不要|不用|没有)时间限制|不赶时间|不限时间|不限制.*时间|取消.*时间|不限定时间|不用.*时间限制",
                 message,
             ):
-                raise ValueError("Cannot silently withdraw time limit")
+                raise _OutputViolation("clear_time_limit", "invalid_semantics")
             return intent
-        except (ValidationError, ValueError):
-            raise LLMOutputError() from None
+        except ValidationError as error:
+            raise _schema_error(error, "intent") from None
+        except _OutputViolation as error:
+            raise LLMOutputError(
+                stage="intent", field=error.field, category=error.category,
+            ) from None
+        except ValueError:
+            raise LLMOutputError(stage="intent", category="invalid_semantics") from None
 
     @staticmethod
     def _validate_intent(intent: Intent, state: SessionState) -> None:
@@ -174,14 +226,14 @@ class DeepSeekLLM(BaseLLM):
             if values is not None and (
                 len(values) > 30 or any(not item.strip() or len(item) > 100 for item in values)
             ):
-                raise ValueError("Invalid constraint list")
+                raise _OutputViolation(field, "invalid_semantics")
         if len(intent.allergy_clarifications) > 10:
-            raise ValueError("Too many allergy clarifications")
+            raise _OutputViolation("allergy_clarifications", "out_of_range")
         if len(intent.diner_updates) > 8:
-            raise ValueError("Too many diner updates")
+            raise _OutputViolation("diner_updates", "out_of_range")
         for update in intent.diner_updates:
             if update.no_spicy is False:
-                raise ValueError("Cannot silently withdraw a diner safety constraint")
+                raise _OutputViolation("diner_updates", "invalid_semantics")
             values = [
                 update.diner,
                 *update.aliases,
@@ -192,14 +244,14 @@ class DeepSeekLLM(BaseLLM):
                 *update.health_goals,
             ]
             if any(not value.strip() or len(value) > 100 for value in values):
-                raise ValueError("Invalid diner update")
+                raise _OutputViolation("diner_updates", "invalid_semantics")
             if update.allergy_clarifications:
                 try:
                     diner = find_diner(state.diners, update)
                 except DinerConflict as error:
-                    raise ValueError("Ambiguous allergy owner") from error
+                    raise _OutputViolation("diner_updates", "invalid_semantics") from error
                 if diner is None:
-                    raise ValueError("No attributed pending allergy")
+                    raise _OutputViolation("diner_updates", "invalid_semantics")
                 DeepSeekLLM._validate_allergy_clarifications(
                     update.allergy_clarifications, diner.pending_allergy_terms
                 )
@@ -207,46 +259,42 @@ class DeepSeekLLM(BaseLLM):
             intent.allergy_clarifications, state.pending_allergy_terms
         )
         if getattr(intent, "clear_time_limit", False) and intent.max_minutes is not None:
-            raise ValueError("Conflicting time constraints")
+            raise _OutputViolation("clear_time_limit", "invalid_semantics")
         if intent.meal_type is not None and intent.meal_type not in _MEAL_TYPES:
-            raise ValueError("Unknown meal type")
-        if (
-            intent.soup_count is not None
-            and intent.dish_count is not None
-            and intent.soup_count > intent.dish_count
-        ):
-            raise ValueError("Soup count exceeds menu size")
+            raise _OutputViolation("meal_type", "invalid_semantics")
+        # In-range count contradictions are understandable requests. The agent
+        # persists their raw pair as pending, without committing invalid counts.
         if intent.action == "clarify":
             if not intent.clarification or not intent.clarification.strip():
-                raise ValueError("Missing clarification")
+                raise _OutputViolation("clarification", "missing_field")
         elif intent.clarification is not None:
-            raise ValueError("Unexpected clarification")
+            raise _OutputViolation("clarification", "invalid_semantics")
         if intent.action in {"replace", "explain"} and not state.menu_ids:
-            raise ValueError("No current menu")
+            raise _OutputViolation("action", "invalid_semantics")
         if intent.action == "replace":
             if intent.replace_slot is None and not (
                 intent.replace_name and intent.replace_name.strip()
             ):
-                raise ValueError("Missing replacement target")
+                raise _OutputViolation("replace_slot", "missing_field")
             if intent.replace_slot is not None and intent.replace_slot > len(state.menu_ids):
-                raise ValueError("Unknown replacement slot")
+                raise _OutputViolation("replace_slot", "out_of_range")
         elif intent.replace_slot is not None or intent.replace_name is not None:
-            raise ValueError("Unexpected replacement target")
+            raise _OutputViolation("replace_slot", "invalid_semantics")
         if intent.no_spicy is False and state.constraints.no_spicy:
-            raise ValueError("Cannot silently withdraw existing constraint")
+            raise _OutputViolation("no_spicy", "invalid_semantics")
 
     @staticmethod
     def _validate_allergy_clarifications(
         clarifications: dict[str, list[str]], pending_terms: list[str]
     ) -> None:
         if len(clarifications) > 10:
-            raise ValueError("Too many allergy clarifications")
+            raise _OutputViolation("allergy_clarifications", "out_of_range")
         for pending, values in clarifications.items():
             if (
                 pending not in pending_terms or not values or len(values) > 10
                 or any(not item.strip() or len(item) > 100 for item in values)
             ):
-                raise ValueError("Invalid pending allergy resolution")
+                raise _OutputViolation("allergy_clarifications", "invalid_semantics")
 
     async def explain(self, facts: dict[str, str]) -> list[str]:
         if not facts:
@@ -263,8 +311,12 @@ class DeepSeekLLM(BaseLLM):
             if len(set(selected)) != len(selected) or any(key not in facts for key in selected):
                 raise ValueError("Unverified reason ID")
             return selected
-        except (ValidationError, ValueError):
-            raise LLMOutputError() from None
+        except ValidationError as error:
+            raise _schema_error(error, "explanation") from None
+        except ValueError:
+            raise LLMOutputError(
+                stage="explanation", field="reason_ids", category="invalid_semantics",
+            ) from None
 
     async def aclose(self) -> None:
         if self._owns_client:

@@ -77,6 +77,10 @@ class Diner(DomainModel):
     aliases: list[str] = Field(default_factory=list, max_length=20)
     attendance: bool = True
     profile_owner: bool = False
+    # Legacy profile records do not prove which attendee owns the account.
+    # attendance=True keeps their restrictions conservative until linked;
+    # participation_basis decides whether they are a confirmed extra person.
+    participation_basis: Literal["explicit", "profile_unlinked", "legacy"] = "legacy"
     allergies: list[str] = Field(default_factory=list)
     # Unknown terms stay attached to this identity until explicitly resolved.
     pending_allergy_terms: list[str] = Field(default_factory=list)
@@ -144,6 +148,13 @@ class MenuItem(DomainModel):
     replacement_reason: str | None = None
 
 
+class PendingMenuCounts(DomainModel):
+    """A well-formed request awaiting correction, never effective constraints."""
+
+    dish_count: int = Field(ge=1, le=8)
+    soup_count: int = Field(ge=0, le=3)
+
+
 class SessionState(DomainModel):
     session_id: str
     user_id: int
@@ -160,6 +171,7 @@ class SessionState(DomainModel):
     pending_allergy: bool = False
     pending_allergy_terms: list[str] = Field(default_factory=list)
     pending_clarification: str | None = None
+    pending_menu_counts: PendingMenuCounts | None = None
     last_message: str = ""
     history: list[dict[str, str]] = Field(default_factory=list)
     confirmed_fields: list[Literal["people", "meal_type", "restrictions"]] = Field(

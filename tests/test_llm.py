@@ -130,7 +130,6 @@ async def test_parse_attributed_diner_updates_and_send_stable_diner_context(prof
     {"action": "plan", "allergies": [""]},
     {"action": "plan", "allergies": "虾"},
     {"action": "plan", "meal_type": "午夜大餐"},
-    {"action": "plan", "dish_count": 1, "soup_count": 2},
     {"action": "plan", "replace_slot": 1},
     {"action": "plan", "no_spicy": False},
     {"action": "clarify"},

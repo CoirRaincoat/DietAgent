@@ -26,6 +26,7 @@ export interface Constraints {
 }
 export interface Diner {
   diner_id: string; display_name: string; aliases: string[]; attendance: boolean; profile_owner: boolean;
+  participation_basis?: 'explicit' | 'profile_unlinked' | 'legacy';
   allergies: string[]; excluded_ingredients: string[]; preferred_ingredients: string[];
   preferences: string[]; health_goals: string[]; no_spicy: boolean;
 }
@@ -37,6 +38,7 @@ export interface SessionState {
   session_id: string; user_id: number; revision: number; constraints: Constraints;
   meal_constraints: Constraints | null; diners: Diner[]; menu_structure_explicit: boolean;
   menu_ids: string[]; menu_valid: boolean; pending_allergy: boolean; pending_allergy_terms: string[];
+  pending_menu_counts?: { dish_count: number; soup_count: number } | null;
   pending_clarification: string | null; last_message: string; history: {role:string;content:string}[];
   confirmed_fields: string[]; pending_fields: string[];
 }

@@ -1,6 +1,7 @@
 """FastAPI transport; business behavior lives in MealAgent."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -27,6 +28,16 @@ from app.infrastructure.llm.deepseek import DeepSeekLLM
 from app.infrastructure.sessions import SessionConflict, SessionStore
 from app.infrastructure.settings import Settings
 from app.infrastructure.synthetic import load_synthetic_catalog
+
+logger = logging.getLogger(__name__)
+
+
+def log_output_error(error: LLMOutputError) -> None:
+    """Log only allowlisted metadata, correlated with the public response header."""
+    logger.warning(
+        "llm_output_rejected stage=%s field=%s category=%s request_id=%s",
+        error.stage, error.field, error.category, error.request_id,
+    )
 
 
 class ChatRequest(BaseModel):
@@ -162,9 +173,11 @@ def create_app(
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": str(error)}) from None
         except SessionConflict as error:
             raise HTTPException(409, detail={"code": "SESSION_CONFLICT", "message": str(error)}) from None
-        except LLMOutputError:
+        except LLMOutputError as error:
+            log_output_error(error)
             raise HTTPException(
-                502, detail={"code": "LLM_INVALID_OUTPUT", "message": "模型未返回可验证的需求结构，请重试。"}
+                502, detail={"code": "LLM_INVALID_OUTPUT", "message": "模型未返回可验证的需求结构，请重试。"},
+                headers={"X-Request-ID": error.request_id},
             ) from None
         except LLMUnavailable as error:
             if error.code == "original_profile_blocked":
@@ -209,13 +222,18 @@ def create_app(
             raise OpenAIRequestError(404, str(error), "not_found") from None
         except SessionConflict as error:
             raise OpenAIRequestError(409, str(error), "session_conflict") from None
-        except LLMOutputError:
-            raise OpenAIRequestError(
+        except LLMOutputError as error:
+            log_output_error(error)
+            public_error = OpenAIRequestError(
                 502,
                 "模型未返回可验证的需求结构，请重试。",
                 "llm_invalid_output",
                 error_type="server_error",
-            ) from None
+            )
+            return JSONResponse(
+                status_code=502, content=error_body(public_error),
+                headers={"X-Request-ID": error.request_id},
+            )
         except LLMUnavailable as error:
             if error.code == "original_profile_blocked":
                 raise OpenAIRequestError(
