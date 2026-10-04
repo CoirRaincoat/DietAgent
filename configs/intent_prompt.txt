@@ -12,8 +12,11 @@ inventory 仅当用户明确限制可用食材时填写列表，不能把“想�
 
 replace：替换一个当前菜单项。明确“第2道”则 replace_slot=2（从1开始）。明确菜名则 replace_name 保留原名，不猜测名称对应位置；不要把菜谱ID当菜名。序号须存在于 current_menu。没有当前菜单、目标不明确、一次要求替换多项时 action=clarify，clarification 给出一句简短中文说明。不要把“换道不辣的”解释成允许改变所有菜单项。
 reject：明确拒绝整份菜单、要求重新推荐；此前过敏和禁忌继续保留。explain：用户只要求解释当前菜单，没有菜单则 clarify。
-clarify：缺少关键指代，或要求当前系统不支持的撤销/删除已有约束、回滚历史、精确营养数值、诊断/治疗、周计划/多餐计划时，返回 clarification 说明需要确认或当前能力边界，不能猜测或假装完成。明确的做饭时间上限可以抽取为 max_minutes，由程序决定能否可靠满足，不要自行保证满足时间。
+clarify：缺少关键指代，或要求撤销/删除过敏、健康目标等硬约束、回滚历史、精确营养数值、诊断/治疗、周计划/多餐计划等当前系统不支持的变更时，返回 clarification 说明需要确认或当前能力边界，不能猜测或假装完成。普通忌口的撤销用 revoke_exclusions 表达，不返回 clarify。明确的做饭时间上限可以抽取为 max_minutes，由程序决定能否可靠满足，不要自行保证满足时间。
 “取消过敏”“其实不过敏”“不再限制食材”“改回上一份菜单”等不能静默改变状态，必须 clarify。原本禁辣后要求恢复辣味也须 clarify。
+revoke_exclusions 表示撤销普通忌口（不吃/不喜欢），只撤销 excluded_ingredients 中已存在的普通忌口，且仅在用户明确断言某条已有普通忌口不再适用时填写。覆盖：直接撤销（“取消鸡蛋忌口”“去掉牛奶限制”“把鸡蛋和牛奶从忌口里删掉”）、引用历史（“取消刚才‘不吃鸡蛋’这一条”“把之前的鸡蛋限制取消”）、纠正前述（“刚才说错了，鸡蛋不用忌”）、状态变化（“我现在可以吃鸡蛋了”“牛奶不用再避开了”）、部分撤销（“只取消鸡蛋”“鸡蛋和牛奶里只取消鸡蛋”）。只填本轮明确目标、不得多删：如“鸡蛋可以吃了但牛奶继续不吃”只填 [“鸡蛋”]，不填牛奶。首次撤销请求只填 revoke_exclusions，可配合 diner_updates 指定某位用餐者；不要同时填 revoke_confirmed。目标不在当前 excluded_ingredients 中（本就没有该忌口）时不填 revoke_exclusions。过敏 allergies、健康目标 health_goals 等硬约束绝不填入 revoke_exclusions。
+revoke_confirmed 仅在当前上下文已有 pending_revoke_exclusion 待确认撤销，且用户明确回答“确认”“是的”“对”“可以”“就这样”“取消吧”时才填 true；无 pending 的“确认”不填。revoke_cancelled 仅在已有 pending 且用户回答“算了”“不用了”“不取消”“保持原样”“别删了”时才填 true。两者不能同时为 true。
+问句（“可以取消鸡蛋忌口吗？”）、条件句（“如果以后可以吃鸡蛋，就取消鸡蛋忌口”）、举例引用（“‘取消鸡蛋忌口’只是举例”）、单纯想吃（“今天想吃鸡蛋”而未表示已有忌口不再适用）不是撤销请求，不填 revoke_exclusions，也不填 revoke_confirmed/revoke_cancelled。只有当前明确断言某条已有普通忌口不再适用才算 revoke。“取消花生过敏”“删掉低盐要求”“糖尿病饮食限制不要了”等撤销过敏或健康目标的请求不填 revoke_exclusions，返回 clarify。
 如字段超出 Schema 范围（例如超过8人、超过8项菜单），使用 clarify，不要截断到上限。clarify 必须有非空 clarification；其他 action 不写 clarification。
 
 当前会话持续规划同一餐；明确改为另一餐或要求开始全新用餐时，应 clarify 并提示新建会话，不能默认清空旧餐的约束。

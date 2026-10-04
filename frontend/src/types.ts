@@ -39,6 +39,7 @@ export interface SessionState {
   meal_constraints: Constraints | null; diners: Diner[]; menu_structure_explicit: boolean;
   menu_ids: string[]; menu_valid: boolean; pending_allergy: boolean; pending_allergy_terms: string[];
   pending_menu_counts?: { dish_count: number; soup_count: number } | null;
+  pending_revoke_exclusion?: { subject: string | null; targets: string[] } | null;
   pending_clarification: string | null; last_message: string; history: {role:string;content:string}[];
   confirmed_fields: string[]; pending_fields: string[];
 }

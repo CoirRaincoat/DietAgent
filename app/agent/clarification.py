@@ -24,6 +24,19 @@ def asserted_context(message: str) -> bool:
     )
 
 
+def revoke_asserted_context(message: str) -> bool:
+    """A revoke request may quote the constraint it cancels ("取消刚才'不吃鸡蛋'这一条"),
+    so quotes alone do not disqualify it. Still reject questions, conditionals,
+    uncertainty, attribution to others and explicit example/reference phrasing,
+    which are not current assertions."""
+    return not re.search(
+        r"[?？]|是否|不确定|可能|也许|听说|他说|她说|据说|"
+        r"不是|并非|不一定|能否|" + _CONDITIONAL_MARKERS + "|"
+        r"举例|示范|例子|演示|比如说|好比|打个比方",
+        message,
+    )
+
+
 def _describes_individual_member(message: str, count_terms: list[str]) -> bool:
     """A lone Chinese "一个人/一人" is a per-member description, not the total.
 

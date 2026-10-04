@@ -179,6 +179,10 @@ class DeepSeekLLM(BaseLLM):
             "pending_menu_counts": (
                 state.pending_menu_counts.model_dump() if state.pending_menu_counts else None
             ),
+            "pending_revoke_exclusion": (
+                state.pending_revoke_exclusion.model_dump()
+                if state.pending_revoke_exclusion else None
+            ),
             "recent_history": state.history[-6:],
             "profile": profile.model_dump(
                 include={"preferences", "allergies", "health_goals", "special_groups"}
@@ -219,8 +223,9 @@ class DeepSeekLLM(BaseLLM):
     @staticmethod
     def _validate_intent(intent: Intent, state: SessionState) -> None:
         for field in (
-            "excluded_ingredients", "allergies", "preferred_ingredients", "health_goals",
-            "preferences", "inventory", "query_terms",
+            "excluded_ingredients", "revoke_exclusions", "allergies",
+            "preferred_ingredients", "health_goals", "preferences", "inventory",
+            "query_terms",
         ):
             values = getattr(intent, field)
             if values is not None and (
@@ -231,6 +236,8 @@ class DeepSeekLLM(BaseLLM):
             raise _OutputViolation("allergy_clarifications", "out_of_range")
         if len(intent.diner_updates) > 8:
             raise _OutputViolation("diner_updates", "out_of_range")
+        if intent.revoke_confirmed and intent.revoke_cancelled:
+            raise _OutputViolation("revoke_confirmed", "invalid_semantics")
         for update in intent.diner_updates:
             if update.no_spicy is False:
                 raise _OutputViolation("diner_updates", "invalid_semantics")
@@ -239,6 +246,7 @@ class DeepSeekLLM(BaseLLM):
                 *update.aliases,
                 *update.allergies,
                 *update.excluded_ingredients,
+                *update.revoke_exclusions,
                 *update.preferred_ingredients,
                 *update.preferences,
                 *update.health_goals,

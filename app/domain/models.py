@@ -63,6 +63,7 @@ class DinerUpdate(DomainModel):
     allergies: list[str] = Field(default_factory=list, max_length=30)
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     excluded_ingredients: list[str] = Field(default_factory=list, max_length=30)
+    revoke_exclusions: list[str] = Field(default_factory=list, max_length=30)
     preferred_ingredients: list[str] = Field(default_factory=list, max_length=30)
     preferences: list[str] = Field(default_factory=list, max_length=30)
     health_goals: list[str] = Field(default_factory=list, max_length=30)
@@ -110,6 +111,9 @@ class Constraints(DomainModel):
 class Intent(DomainModel):
     action: Literal["plan", "replace", "reject", "explain", "clarify"] = "plan"
     excluded_ingredients: list[str] = Field(default_factory=list)
+    revoke_exclusions: list[str] = Field(default_factory=list, max_length=30)
+    revoke_confirmed: bool = False
+    revoke_cancelled: bool = False
     allergies: list[str] = Field(default_factory=list)
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     diner_updates: list[DinerUpdate] = Field(default_factory=list, max_length=8)
@@ -155,6 +159,13 @@ class PendingMenuCounts(DomainModel):
     soup_count: int = Field(ge=0, le=3)
 
 
+class PendingRevokeExclusion(DomainModel):
+    """A revocation request awaiting confirmation, ordinary exclusions only."""
+
+    subject: str | None = None  # None = the speaker's meal-level exclusions
+    targets: list[str] = Field(default_factory=list, max_length=30)
+
+
 class SessionState(DomainModel):
     session_id: str
     user_id: int
@@ -172,6 +183,7 @@ class SessionState(DomainModel):
     pending_allergy_terms: list[str] = Field(default_factory=list)
     pending_clarification: str | None = None
     pending_menu_counts: PendingMenuCounts | None = None
+    pending_revoke_exclusion: PendingRevokeExclusion | None = None
     last_message: str = ""
     history: list[dict[str, str]] = Field(default_factory=list)
     confirmed_fields: list[Literal["people", "meal_type", "restrictions"]] = Field(

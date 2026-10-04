@@ -26,6 +26,7 @@ from app.agent.diners import (
 )
 from app.agent.menu_balance import analyze_menu_balance, balance_summary
 from app.agent.planner import MenuPlanner, PlanResult
+from app.agent.revoke_exclusion import apply_revoke_exclusion
 from app.agent.suggestions import replacement_candidates
 from app.api.presentation import build_card, recipe_provenance, split_cooking_steps
 from app.domain.allergy_mentions import (
@@ -157,6 +158,7 @@ class MealAgent:
         state.meal_constraints = meal_constraints
         constraints = meal_constraints
         count_issue = apply_menu_counts(state, intent)
+        revoke_issue = apply_revoke_exclusion(state, intent, message)
         confirm_from_intent(state, intent, message)
         repair_proven_reference_pending(state)
         # Unknown terms are pending questions, not permanent hard constraints.
@@ -272,6 +274,8 @@ class MealAgent:
         unresolved = self.rules.unresolved_allergies(state.constraints)
         if unresolved:
             return "当前词典无法确认这些过敏原，请明确具体食材：" + "、".join(unresolved)
+        if revoke_issue:
+            return revoke_issue
         if count_issue:
             return count_issue
         if state.constraints.soup_count > state.constraints.dish_count:

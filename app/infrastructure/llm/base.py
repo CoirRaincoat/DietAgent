@@ -36,7 +36,8 @@ class LLMOutputError(LLMUnavailable):
     }
     _FIELDS = {
         "unknown", "content", "choices", "finish_reason", "action",
-        "excluded_ingredients", "allergies", "allergy_clarifications", "diner_updates",
+        "excluded_ingredients", "revoke_exclusions", "revoke_confirmed", "revoke_cancelled",
+        "allergies", "allergy_clarifications", "diner_updates",
         "preferred_ingredients", "health_goals", "preferences", "inventory", "no_spicy",
         "meal_type", "dish_count", "soup_count", "people", "restrictions_confirmed",
         "max_minutes", "clear_time_limit", "replace_slot", "replace_name", "query_terms",
