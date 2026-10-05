@@ -2,8 +2,16 @@
 
 from collections.abc import Sequence
 
+from app.agent.diners import confirmed_attendees, is_unlinked_profile
 from app.agent.menu_balance import MenuBalance, balance_summary
-from app.domain.models import ClarificationQuestion, Constraints, Diner, Intent, Recipe
+from app.domain.models import (
+    ClarificationQuestion,
+    Constraints,
+    Diner,
+    Intent,
+    Recipe,
+    SessionState,
+)
 
 
 def clarification_copy(questions: Sequence[ClarificationQuestion]) -> str:
@@ -86,7 +94,7 @@ def _constraint_copy(constraints: Constraints) -> str:
 
 def _diner_copy(diners: Sequence[Diner]) -> str | None:
     """Describe attributed diner restrictions when at least two diners attend."""
-    active = [diner for diner in diners if diner.attendance]
+    active = confirmed_attendees(list(diners))
     if len(active) < 2:
         return None
     descriptions: list[str] = []
@@ -123,6 +131,59 @@ def response_facts(
     diner_text = _diner_copy(diners)
     if diner_text:
         facts["diners"] = diner_text
+    if any(diner.attendance and is_unlinked_profile(diner) for diner in diners):
+        facts["profile_scope"] = (
+            "档案主体身份待关联；已知限制保守用于共享菜单核对，"
+            "未推断其对应哪位参餐者，也未断言其缺席。"
+        )
+    return facts
+
+
+def state_change_facts(intent: Intent, before: SessionState, after: SessionState) -> dict[str, str]:
+    """Describe completed operations from state evidence, never model intent alone."""
+    if not after.menu_valid:
+        return {}
+    facts: dict[str, str] = {}
+    if intent.restore_menu is not None and after.menu_history:
+        original = after.menu_history[0]
+        if after.menu_ids == original.recipe_ids:
+            active_before = {action.action_id for action in before.rejection_actions if action.active}
+            undone = any(
+                action.action_id in active_before and not action.active
+                and action.source_menu_revision_id == original.revision_id
+                for action in after.rejection_actions
+            )
+            undo_copy = "并仅撤销与之对应的拒绝记录；" if undone else "；"
+            facts["restore"] = (
+                "已按你的要求恢复此前那桌菜单" + undo_copy
+                + "后来新增的过敏、忌口与要求仍然保留。"
+            )
+    if intent.restore_constraints:
+        facts["constraint_restore"] = (
+            f"已将总菜数恢复为 {after.constraints.dish_count} 道；"
+            "后来新增的过敏、忌口与要求仍然保留。"
+        )
+    pending = before.pending_revoke_exclusion
+    if pending is not None and after.pending_revoke_exclusion is None:
+        if intent.revoke_cancelled:
+            facts["operation"] = "已取消本次撤销请求，原有忌口继续保留。"
+        elif intent.revoke_confirmed:
+            old_meal = before.meal_constraints or before.constraints
+            new_meal = after.meal_constraints or after.constraints
+            removed = [v for v in old_meal.excluded_ingredients if v not in new_meal.excluded_ingredients]
+            old_diners = {d.diner_id: d for d in before.diners}
+            for diner in after.diners:
+                old = old_diners.get(diner.diner_id)
+                if old is not None:
+                    removed.extend(v for v in old.excluded_ingredients if v not in diner.excluded_ingredients)
+            if removed:
+                label = pending.subject + "的" if pending.subject else ""
+                facts["operation"] = (
+                    "已确认取消" + label + "普通忌口「" + "、".join(dict.fromkeys(removed))
+                    + "」；其他忌口与过敏仍然保留。"
+                )
+            else:
+                facts["operation"] = "本轮未删除任何普通忌口，现有忌口与过敏仍然保留。"
     return facts
 
 
@@ -131,6 +192,7 @@ def required_fact_ids(intent: Intent, facts: dict[str, str]) -> list[str]:
     required = ["opening", "constraints"]
     if intent.action != "replace":
         required.append("balance")
-    if "diners" in facts:
-        required.append("diners")
+    required.extend(key for key in (
+        "catalog", "nutrition", "profile_scope", "diners", "restore", "constraint_restore",
+    ) if key in facts)
     return required

@@ -63,6 +63,7 @@ class DinerUpdate(DomainModel):
     allergies: list[str] = Field(default_factory=list, max_length=30)
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     excluded_ingredients: list[str] = Field(default_factory=list, max_length=30)
+    revoke_exclusions: list[str] = Field(default_factory=list, max_length=30)
     preferred_ingredients: list[str] = Field(default_factory=list, max_length=30)
     preferences: list[str] = Field(default_factory=list, max_length=30)
     health_goals: list[str] = Field(default_factory=list, max_length=30)
@@ -77,6 +78,10 @@ class Diner(DomainModel):
     aliases: list[str] = Field(default_factory=list, max_length=20)
     attendance: bool = True
     profile_owner: bool = False
+    # Legacy profile records do not prove which attendee owns the account.
+    # attendance=True keeps their restrictions conservative until linked;
+    # participation_basis decides whether they are a confirmed extra person.
+    participation_basis: Literal["explicit", "profile_unlinked", "legacy"] = "legacy"
     allergies: list[str] = Field(default_factory=list)
     # Unknown terms stay attached to this identity until explicitly resolved.
     pending_allergy_terms: list[str] = Field(default_factory=list)
@@ -103,12 +108,34 @@ class Constraints(DomainModel):
     max_minutes: int | None = Field(default=None, ge=1, le=480)
 
 
+class RestoreConstraint(DomainModel):
+    """A field-scoped request to restore an earlier explicit constraint value."""
+
+    field: Literal["dish_count"]
+    reference: Literal["original"] = "original"
+
+
+class RestoreMenuIntent(DomainModel):
+    """A menu-level request to restore an earlier menu snapshot (J18).
+
+    The model only names which menu it wants; it never guesses recipe IDs. The
+    resolver looks the menu up from recorded history and revalidates it.
+    """
+
+    reference: Literal["original"] = "original"
+
+
 class Intent(DomainModel):
     action: Literal["plan", "replace", "reject", "explain", "clarify"] = "plan"
     excluded_ingredients: list[str] = Field(default_factory=list)
+    revoke_exclusions: list[str] = Field(default_factory=list, max_length=30)
+    revoke_confirmed: bool = False
+    revoke_cancelled: bool = False
     allergies: list[str] = Field(default_factory=list)
     allergy_clarifications: dict[str, list[str]] = Field(default_factory=dict)
     diner_updates: list[DinerUpdate] = Field(default_factory=list, max_length=8)
+    restore_constraints: list[RestoreConstraint] = Field(default_factory=list, max_length=4)
+    restore_menu: RestoreMenuIntent | None = None
     preferred_ingredients: list[str] = Field(default_factory=list)
     health_goals: list[str] = Field(default_factory=list)
     preferences: list[str] = Field(default_factory=list)
@@ -144,6 +171,48 @@ class MenuItem(DomainModel):
     replacement_reason: str | None = None
 
 
+class PendingMenuCounts(DomainModel):
+    """A well-formed request awaiting correction, never effective constraints."""
+
+    dish_count: int = Field(ge=1, le=8)
+    soup_count: int = Field(ge=0, le=3)
+
+
+class PendingRevokeExclusion(DomainModel):
+    """A revocation request awaiting confirmation, ordinary exclusions only."""
+
+    subject: str | None = None  # None = the speaker's meal-level exclusions
+    targets: list[str] = Field(default_factory=list, max_length=30)
+
+
+class ConstraintRevision(DomainModel):
+    """One explicitly confirmed value of a restorable constraint field."""
+
+    field: str
+    value: int
+    turn_index: int
+    source: Literal["explicit_user"] = "explicit_user"
+
+
+class MenuRevision(DomainModel):
+    """One valid menu version actually generated and returned to the user."""
+
+    revision_id: str
+    turn_index: int
+    recipe_ids: list[str]
+    source: Literal["planned_menu", "restored_menu"] = "planned_menu"
+
+
+class RejectionAction(DomainModel):
+    """One whole-menu rejection, recording only the newly rejected delta."""
+
+    action_id: str
+    turn_index: int
+    rejected_recipe_ids: list[str]
+    source_menu_revision_id: str | None = None
+    active: bool = True
+
+
 class SessionState(DomainModel):
     session_id: str
     user_id: int
@@ -160,8 +229,15 @@ class SessionState(DomainModel):
     pending_allergy: bool = False
     pending_allergy_terms: list[str] = Field(default_factory=list)
     pending_clarification: str | None = None
+    pending_menu_counts: PendingMenuCounts | None = None
+    pending_revoke_exclusion: PendingRevokeExclusion | None = None
     last_message: str = ""
     history: list[dict[str, str]] = Field(default_factory=list)
+    constraint_history: list[ConstraintRevision] = Field(default_factory=list)
+    # Menu version snapshots and per-rejection deltas support scoped restore
+    # (J18). They are separate from J17's field-scoped constraint_history.
+    menu_history: list[MenuRevision] = Field(default_factory=list)
+    rejection_actions: list[RejectionAction] = Field(default_factory=list)
     confirmed_fields: list[Literal["people", "meal_type", "restrictions"]] = Field(
         default_factory=list
     )

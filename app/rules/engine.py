@@ -58,6 +58,7 @@ class RuleEngine:
             self._known_foods.update(value.get("discourage_terms", []))
             self._known_foods.update(value.get("prefer_terms", []))
         self._known_foods.update(self.config["spicy_terms"])
+        self._known_food_names = {self.canonical_food(value) for value in self._known_foods}
 
     def canonical_food(self, value: str) -> str:
         cleaned = compact(value)
@@ -78,10 +79,21 @@ class RuleEngine:
                 return [key]
         if value in [compact(s) for s in self.config["specific_allergens"]]:
             return [f"specific:{value}"]
+        canonical = self.canonical_food(value)
+        if canonical in [compact(s) for s in self.config["specific_allergens"]]:
+            return [f"specific:{canonical}"]
         return []
 
     def unresolved_allergies(self, constraints: Constraints) -> list[str]:
         return [a for a in constraints.allergies if not self._allergen_keys(a)]
+
+    def unresolved_exclusions(self, constraints: Constraints) -> list[str]:
+        """No substring hit is not proof of safety for an unsupported food name."""
+        return [
+            value for value in constraints.excluded_ingredients
+            if not self._allergen_keys(value)
+            and self.canonical_food(value) not in self._known_food_names
+        ]
 
     def _food_text(self, recipe: Recipe) -> str:
         # Titles and promotional labels are deliberately absent. Step-only
@@ -163,6 +175,9 @@ class RuleEngine:
         unresolved = self.unresolved_allergies(constraints)
         if unresolved:
             reasons.append("过敏原缺少已支持映射，需要澄清：" + "、".join(unresolved))
+        unresolved_exclusions = self.unresolved_exclusions(constraints)
+        if unresolved_exclusions:
+            reasons.append("排除食材缺少已支持映射，需要澄清：" + "、".join(unresolved_exclusions))
         if constraints.allergies and "unparsed_ingredients" in recipe.quality_flags:
             reasons.append("食材解析不完整，无法核对过敏限制。")
 
@@ -177,11 +192,13 @@ class RuleEngine:
                 reasons.append(
                     f"复合配料来源不明，无法核对过敏限制「{allergy}」：{'、'.join(uncertain)}。"
                 )
-        if constraints.allergies:
+        if constraints.allergies or constraints.excluded_ingredients:
             uncertain = [term for term in self.config["uncertain_composites"]
                          if contains_term(text, term)]
             if uncertain:
-                reasons.append("复合配料成分不明确，无法确认过敏限制：" + "、".join(uncertain))
+                restriction = "过敏限制" if constraints.allergies else "排除食材限制"
+                reasons.append(f"复合配料成分不明确，无法确认{restriction}：" + "、".join(uncertain))
+        if constraints.allergies:
             warnings.append("仅核对菜谱文字中的已知过敏原；未验证品牌配方或烹饪交叉接触。")
         for excluded in constraints.excluded_ingredients:
             matches = self.food_matches(recipe, excluded)

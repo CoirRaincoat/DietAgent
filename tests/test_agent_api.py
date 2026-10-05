@@ -193,6 +193,7 @@ def test_explanation_failure_uses_verified_facts(tmp_path, catalog):
         result = client.post("/chat", json={"user_id": 3, "message": "1人晚餐，没有其他忌口"}).json()
         assert result["status"] == "ok"
         assert result["explanation_source"] == "verified_template"
+        assert "未计算" in result["reason"]
         assert "搭配上包含" in result["reason"]
         assert "recipe_id" not in result["reason"]
 
@@ -559,6 +560,7 @@ def test_openai_sse_chunks_reconstruct_verified_answer(tmp_path, catalog):
     content = "".join(
         chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
     )
+    assert "本餐菜品均来自方太菜谱库" in content
     assert "已根据你确认的人数、餐次和饮食要求安排好这餐" in content
     assert "可通过 recipe_id" not in content
 
