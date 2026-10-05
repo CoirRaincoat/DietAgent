@@ -5,6 +5,7 @@ import json
 import httpx
 import pytest
 
+from app.agent.count_conflicts import apply_menu_counts
 from app.domain.models import Constraints, Diner, SessionState, UserProfile
 from app.infrastructure.llm.base import LLMOutputError, LLMUnavailable
 from app.infrastructure.llm.deepseek import DeepSeekLLM
@@ -143,6 +144,23 @@ async def test_reject_invalid_or_unsafe_intents(content, profile, state):
         with pytest.raises(LLMOutputError) as caught:
             await adapter.parse("安排一下", state, profile)
         assert caught.value.code == "invalid_output"
+
+
+async def test_original_conflicting_count_payload_is_pending_not_effective(profile, state):
+    # Keep the original counterexample verbatim. R3 routes well-typed semantic
+    # conflicts to clarification instead of classifying them as malformed JSON.
+    payload = {"action": "plan", "dish_count": 1, "soup_count": 2}
+    before = state.constraints.model_dump()
+    adapter, client = adapter_for(completion(payload))
+    async with client:
+        intent = await adapter.parse("安排一下", state, profile)
+    assert (intent.dish_count, intent.soup_count) == (1, 2)
+    issue = apply_menu_counts(state, intent)
+    assert issue is not None
+    assert (state.pending_menu_counts.dish_count, state.pending_menu_counts.soup_count) == (1, 2)
+    assert state.constraints.model_dump() == before
+    assert state.meal_constraints.model_dump() == before
+    assert state.constraints.allergies == ["花生"]
 
 
 @pytest.mark.parametrize("finish_reason", ["length", "content_filter", "tool_calls", None])
