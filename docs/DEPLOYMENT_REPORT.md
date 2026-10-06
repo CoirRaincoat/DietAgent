@@ -1,5 +1,17 @@
 # 比赛 Demo 部署验收报告
 
+## 10月6日当前源码预检（不能继承历史镜像通过）
+
+当前业务基线为`520433340a0dd02da33062b7141718e8d8cd6ca8`，从其Git包隔离启动Uvicorn，锁依赖一致／pip check、2000方／3synthetic、OpenAPI、原生与兼容无key错误契约通过。原生JSON／兼容JSON／SSE通过真实loopback HTTP复播原公开5组，默认菜单／需求／解释与当前候选相同，重试／跨ID通过。上游Mock冻结响应、0新收费，不是实战理解、独立质量或首Token成绩；复用锁环境，不称新干净安装。
+
+本代理使用独立空配置只读检查DockerDesktopLinuxEngine和docker_engine均不存在，未修改全局Docker、未启动引擎、未构建镜像。旧用户5b后端及Node24前端证据仅属于旧版本。新版Docker／前端／代理、官方50档案配置、真实模型／公网及平台仍待验；最终含文档源码包与版本核验见[冻结清单](DELIVERY_FREEZE_20261006.md)和本地`runtime/delivery_current_20261005/human-review/`。
+
+## 10月5日补验（现行结果）
+
+用户新镜像完整commit `5b504245b9a9b8680514f426574ae6d7b1b2d500`已核原件/包SHA与本地一致；Python3.13.15依赖、镜像实际代码/2000方和真实HTTP启动/错误契约通过，0付费。前端同包Node24干净安装、直接vue-tsc/Vite实际构建与生产preview合成UI/桌面移动截图通过。前端Node22/Alpine/Nginx/Compose/标准npm命令、真实模型/平台未验；代理自身管道仍拒绝不否认用户后端检查完成。见[交付预检](DELIVERY_PREFLIGHT_20261005.md)和`runtime/frontend_preflight_20261005-5b50424/human-review-final/report.md`。下方首次未验说明与9月PASS分别保历史，不当最终交付或菜单质量认证。
+
+> 本文下方PASS为2026-09-24旧版本验收，不能证明10月候选镜像含最新菜单修复。10月5日算法候选`ff1c73d8b27d1f997f8df7b9240a4425180137c1`已在新Python3.12环境完成锁定依赖安装、editable源码安装和独立源码真实本地HTTP预检；未使用密钥/私有档案/付费调用。Docker引擎启动后，代理访问Linux命名管道仍权限拒绝，当前Python3.13新镜像未验，不能沿用旧PASS。官方1–50ID已支持显式本地档案加载，不配置仍3合成；平台联调未验。现行证据与用户侧容器验证见[交付预检](DELIVERY_PREFLIGHT_20261005.md)，截止见[交付计划](DELIVERY_PLAN_20261007.md)。旧证据完整保留。
+
 题目：ZX-2026-0301 · 方太个性化膳食规划 Agent
 验收日期：2026-09-24 · 应用版本：0.2.0 · 结论：PASS
 

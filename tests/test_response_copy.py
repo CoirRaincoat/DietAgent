@@ -75,7 +75,8 @@ def test_local_replacement_names_only_the_changed_slot() -> None:
     )
 
     assert facts["opening"] == ("已按你的要求，只将第 2 道“炒青菜”换成“蒜蓉生菜”，其他菜保持不变。")
-    assert required_fact_ids(intent, facts) == ["opening", "constraints"]
+    assert required_fact_ids(intent, facts) == ["opening", "constraints", "meal_context"]
+    assert "餐次适配尚未核验" in facts["meal_context"]
 
 
 def test_reject_and_explain_copy_do_not_use_mechanical_change_counts() -> None:

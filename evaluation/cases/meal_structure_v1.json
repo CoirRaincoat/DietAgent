@@ -1,0 +1,16 @@
+{
+  "version": "authored-meal-structure-v1",
+  "scope": "Developer culinary-role targets, not official or nutrition requirements",
+  "cases": [
+    {"id": "five_people_six_including_one_soup", "people": 5, "meal_type": "晚餐", "dish_count": 6, "soup_count": 1, "minimum_roles": {"vegetable": 2, "protein": 2, "staple": 1}},
+    {"id": "five_people_seven_including_two_soups", "people": 5, "meal_type": "午餐", "dish_count": 7, "soup_count": 2, "minimum_roles": {"vegetable": 2, "protein": 2, "staple": 1}},
+    {"id": "solo_six_including_one_soup", "people": 1, "meal_type": "晚餐", "dish_count": 6, "soup_count": 1, "minimum_roles": {"vegetable": 2, "protein": 1, "staple": 1}},
+    {"id": "two_people_six_including_one_soup", "people": 2, "meal_type": "晚餐", "dish_count": 6, "soup_count": 1, "minimum_roles": {"vegetable": 2, "protein": 1, "staple": 1}},
+    {"id": "five_people_five_including_one_soup", "people": 5, "meal_type": "晚餐", "dish_count": 5, "soup_count": 1, "minimum_roles": {"vegetable": 2, "protein": 1, "staple": 1}},
+    {"id": "two_food_slots_plus_two_soups", "people": 5, "meal_type": "晚餐", "dish_count": 4, "soup_count": 2, "minimum_roles": {"vegetable": 1, "protein": 1, "staple": 0}},
+    {"id": "one_food_slot_plus_two_soups", "people": 5, "meal_type": "晚餐", "dish_count": 3, "soup_count": 2, "minimum_roles": {"vegetable": 0, "protein": 0, "staple": 0}},
+    {"id": "soups_only_no_impossible_entree_target", "people": 5, "meal_type": "晚餐", "dish_count": 2, "soup_count": 2, "minimum_roles": {"vegetable": 0, "protein": 0, "staple": 0}},
+    {"id": "breakfast_does_not_inherit_two_protein_dinner_target", "people": 5, "meal_type": "早餐", "dish_count": 6, "soup_count": 1, "minimum_roles": {"vegetable": 2, "protein": 1, "staple": 1}},
+    {"id": "eight_dishes_two_soups_shared", "people": 5, "meal_type": "晚餐", "dish_count": 8, "soup_count": 2, "minimum_roles": {"vegetable": 2, "protein": 2, "staple": 1}}
+  ]
+}

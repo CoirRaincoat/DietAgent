@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from app.domain.cooking_methods import main_cooking_methods
 from app.domain.models import Constraints, Recipe
 from app.infrastructure.data import _has_protein_source
 from app.nutrition.structured import analyze_menu, analyze_recipe
@@ -31,8 +32,11 @@ def analyze(recipe: Recipe, constraints: Constraints) -> list[str]:
         notes.append("含蔬菜类食材，可作为本餐食物多样性的一部分；份量需另行确定。")
     if "staple" in recipe.categories:
         notes.append("包含主食类食材；尚未计算碳水化合物或个人分配量。")
-    if recipe.methods:
-        notes.append("记录的烹饪方式：" + "、".join(recipe.methods) + "；做法本身不能证明低油或低热量。")
+    methods = main_cooking_methods(recipe)
+    if methods:
+        notes.append("源步骤支持的成菜做法：" + "、".join(methods) + "；做法本身不能证明低油或低热量。")
+    else:
+        notes.append("成菜做法证据不足，保留未知；不能由目录标签推断低油或低热量。")
     added_sugars = [term for term in ["糖", "蜂蜜", "糖浆", "炼乳"] if contains_term(text, term)]
     if added_sugars:
         notes.append("配料含添加糖来源；用量及食物本身含糖未知，不能判断整道菜总糖。")

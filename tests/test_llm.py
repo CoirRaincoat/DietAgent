@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.agent.count_conflicts import apply_menu_counts
-from app.domain.models import Constraints, Diner, SessionState, UserProfile
+from app.domain.models import Constraints, Diner, MethodMealTradeoff, SessionState, UserProfile
 from app.infrastructure.llm.base import LLMOutputError, LLMUnavailable
 from app.infrastructure.llm.deepseek import DeepSeekLLM
 
@@ -74,11 +74,44 @@ async def test_parse_contract_and_minimal_profile(profile, state):
         assert payload["thinking"] == {"type": "disabled"}
         assert "json" in payload["messages"][0]["content"]
         context = json.loads(payload["messages"][1]["content"])
-        assert context["profile"]["allergies"] == ["花生"]
-        assert context["current_menu"][1] == {"slot": 2, "recipe_id": "recipe-two"}
+        assert "profile" not in context and "existing_constraints" not in context
+        assert context["current_menu"][1] == {"slot": 2}
+        assert context["pending_plan"] is False
         assert "private-raw-marker" not in str(payload)
         assert "private-measurement-marker" not in str(payload)
         assert "fake-test-secret" not in str(payload)
+
+
+async def test_parse_tradeoff_sends_only_action_slot_and_options(profile, state):
+    state.pending_method_tradeoff = MethodMealTradeoff(
+        binding_hash="local-binding-marker",
+        action="replace",
+        replace_slot=2,
+        original_menu_ids=["local-original-marker"],
+        meal_option_ids=["local-meal-marker"],
+        method_option_ids=["local-method-marker"],
+        prompt="local-source-prompt-marker",
+    )
+    observed = []
+
+    def handler(request):
+        observed.append(request)
+        return httpx.Response(200, json=completion({"action": "clarify", "clarification": "请确认优先项。"}))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = DeepSeekLLM("fake-test-secret", client=client)
+        await adapter.parse("优先餐次参考", state, profile)
+
+    payload = json.loads(observed[0].content)
+    context = json.loads(payload["messages"][1]["content"])
+    assert context["pending_method_tradeoff"] == {
+        "action": "replace", "replace_slot": 2,
+        "options": ["优先餐次参考", "优先明确做法参考", "暂不规划"],
+    }
+    for marker in ("local-binding-marker", "local-original-marker", "local-meal-marker",
+                   "local-method-marker", "local-source-prompt-marker"):
+        assert marker not in str(payload)
+    assert state.pending_method_tradeoff.binding_hash == "local-binding-marker"
 
 
 async def test_parse_attributed_diner_updates_and_send_stable_diner_context(profile, state):
@@ -114,8 +147,8 @@ async def test_parse_attributed_diner_updates_and_send_stable_diner_context(prof
     assert intent.diner_updates[0].diner == "妈妈"
     assert intent.diner_updates[0].no_spicy is True
     context = json.loads(json.loads(observed[0].content)["messages"][1]["content"])
-    assert context["diners"][0]["diner_id"] == "profile-1"
-    assert context["diners"][0]["allergies"] == ["花生"]
+    assert "diners" not in context
+    assert "profile-1" not in str(context) and "花生" not in str(context)
     assert "private-raw-marker" not in str(context)
 
 
@@ -266,7 +299,7 @@ async def test_explanation_returns_only_ordered_verified_ids():
     adapter, client = adapter_for(completion({"reason_ids": ["taste", "source"]}))
     async with client:
         assert await adapter.explain({"source": "菜品来自菜谱库。", "taste": "已过滤辣椒。"}) == [
-            "taste", "source",
+            "source", "taste",
         ]
 
 
@@ -275,11 +308,14 @@ async def test_explanation_returns_only_ordered_verified_ids():
     {"reason_ids": []}, {"reason_ids": [1]},
     {"reason_ids": ["source"], "explanation": "虚构热量100千卡"},
 ])
-async def test_explanation_rejects_unverified_content(content):
-    adapter, client = adapter_for(completion(content))
-    async with client:
-        with pytest.raises(LLMOutputError):
-            await adapter.explain({"source": "菜品来自菜谱库。"})
+async def test_explanation_never_requests_provider_content(content):
+    def forbidden(request):
+        pytest.fail("Explanation must be local even with provider credentials")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(forbidden)) as client:
+        adapter = DeepSeekLLM("fake-test-secret", client=client)
+        assert await adapter.explain({"source": "菜品来自菜谱库。"}) == ["source"]
+        assert adapter.explanation_source == "verified_template"
 
 
 async def test_empty_facts_skip_http_and_external_client_is_not_closed():
@@ -306,6 +342,35 @@ async def test_explicit_time_withdrawal_accepted(message, profile, state):
         assert (await adapter.parse(message, state, profile)).clear_time_limit is True
 
 
+@pytest.mark.parametrize("message", [
+    "没有硬性时间限制",
+    "没有硬性时间限制。",
+    "明天一个人吃早餐，没有其他忌口，没有硬性时间限制。",
+    "安排早餐， 没有硬性时间限制；需要提前准备可以说明。",
+])
+async def test_explicit_no_hard_time_limit_accepted(message, profile, state):
+    adapter, client = adapter_for(completion({"action": "plan", "clear_time_limit": True}))
+    async with client:
+        intent = await adapter.parse(message, state, profile)
+        assert intent.clear_time_limit is True
+        assert intent.max_minutes is None
+
+
+@pytest.mark.parametrize("message", [
+    "不是没有硬性时间限制，必须30分钟内完成。",
+    "如果没有硬性时间限制，你会怎么排？",
+    "假如没有硬性时间限制，你会怎么排？",
+    "不要把我说成没有硬性时间限制。",
+    "他之前说‘没有硬性时间限制’，但我需要30分钟内完成。",
+])
+async def test_no_hard_time_limit_not_a_direct_statement_rejected(message, profile, state):
+    adapter, client = adapter_for(completion({"action": "plan", "clear_time_limit": True}))
+    async with client:
+        with pytest.raises(LLMOutputError) as caught:
+            await adapter.parse(message, state, profile)
+        assert caught.value.field == "clear_time_limit"
+
+
 async def test_unstated_time_withdrawal_rejected(profile, state):
     adapter, client = adapter_for(completion({"action": "plan", "clear_time_limit": True}))
     async with client:
@@ -313,13 +378,14 @@ async def test_unstated_time_withdrawal_rejected(profile, state):
             await adapter.parse("随便安排吧", state, profile)
 
 
-async def test_conflicting_time_constraints_rejected(profile, state):
+@pytest.mark.parametrize("message", ["取消时间限制", "没有硬性时间限制"])
+async def test_conflicting_time_constraints_rejected(message, profile, state):
     adapter, client = adapter_for(completion({
         "action": "plan", "clear_time_limit": True, "max_minutes": 30,
     }))
     async with client:
         with pytest.raises(LLMOutputError):
-            await adapter.parse("取消时间限制", state, profile)
+            await adapter.parse(message, state, profile)
 
 @pytest.mark.parametrize("api_key", ["", "   "])
 async def test_missing_api_key_is_deferred_until_request(api_key, profile, state):
@@ -341,7 +407,7 @@ async def test_no_additional_allergy_is_not_an_unspecified_allergy(message, prof
     assert intent.allergies == []
 
 
-async def test_original_profile_is_blocked_before_any_external_request(profile, state):
+async def test_original_profile_remains_local_during_user_only_parse(profile, state):
     requests = []
     def handler(request):
         requests.append(request)
@@ -349,10 +415,12 @@ async def test_original_profile_is_blocked_before_any_external_request(profile, 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = DeepSeekLLM("fake-test-secret", client=client)
         original = profile.model_copy(update={"data_scope": "original"})
-        with pytest.raises(LLMUnavailable) as caught:
-            await adapter.parse("推荐", state, original)
-        assert caught.value.code == "original_profile_blocked"
-        assert requests == []
+        assert (await adapter.parse("推荐", state, original)).action == "plan"
+        assert len(requests) == 1
+        context = json.loads(json.loads(requests[0].content)["messages"][1]["content"])
+        assert "profile" not in context and "diners" not in context
+        assert "花生" not in str(context) and "控糖" not in str(context)
+        assert original.data_scope == "original" and original.raw == profile.raw
 
 
 async def test_allergy_resolution_must_reference_an_existing_pending_term(profile, state):
@@ -463,7 +531,7 @@ async def test_personal_resolution_preserves_scope_and_sends_pending_context(pro
     assert intent.allergy_clarifications == {}
     assert intent.diner_updates[0].allergy_clarifications == {"神秘酱料": ["芝麻"]}
     context = json.loads(json.loads(observed[0].content)["messages"][1]["content"])
-    assert context["diners"][0]["pending_allergy_terms"] == ["神秘酱料"]
+    assert "diners" not in context and context["pending_allergy"] is True
 
 
 @pytest.mark.parametrize("diner,clarifications", [

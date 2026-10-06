@@ -32,15 +32,25 @@ def test_replacement_preserves_unrelated_valid_slots():
     assert [item["slot"] for item in result.changes] == [2]
 
 
-def test_replacement_also_repairs_old_dishes_violating_new_constraint():
+def test_local_replacement_requires_permission_to_repair_unsafe_unrelated_slots():
     a, b, c, d, e = recipe("a", "虾", "protein"), recipe("b", "鸡蛋", "protein"), recipe("c", "白菜"), recipe("d", "豆腐", "protein"), recipe("e", "米饭", "staple")
     result = MenuPlanner(RuleEngine()).plan(
         [a, b, c, d, e], Constraints(allergies=["海鲜"]), current=[a, b, c], replace_slot=2,
     )
-    assert result.failure is None
-    assert result.recipes[2].recipe_id == "c"
-    assert not ({"a", "b"} & {r.recipe_id for r in result.recipes})
-    assert {item["slot"] for item in result.changes} == {1, 2}
+    # Old behavior silently edited slots 1 and 2. A one-slot operation must
+    # neither output the allergic slot nor infer whole-menu edit permission.
+    assert result.failure and not result.recipes
+    assert "其他菜位" in result.failure
+
+
+def test_whole_menu_authorization_still_repairs_unsafe_old_dishes():
+    a, b, c, d, e = recipe("a", "虾", "protein"), recipe("b", "鸡蛋", "protein"), recipe("c", "白菜"), recipe("d", "豆腐", "protein"), recipe("e", "米饭", "staple")
+    constraints = Constraints(allergies=["海鲜"])
+    rules = RuleEngine()
+    result = MenuPlanner(rules).plan([a, b, c, d, e], constraints, current=[a, b, c])
+    assert result.failure is None and len(result.recipes) == 3
+    assert "a" not in {r.recipe_id for r in result.recipes}
+    assert all(rules.evaluate(record, constraints).allowed for record in result.recipes)
 
 
 def test_rejected_ids_never_reappear_and_failure_is_explicit():

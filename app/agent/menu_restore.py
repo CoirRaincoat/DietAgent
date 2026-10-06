@@ -8,6 +8,8 @@ menu against the *current* constraints, and — only when it still holds — und
 exactly the rejection delta that rejected that menu.
 """
 
+from app.domain.dish_composition import composition_satisfied
+from app.domain.meal_roles import is_main_meal_recipe
 from app.domain.models import (
     Intent,
     MenuRevision,
@@ -15,6 +17,7 @@ from app.domain.models import (
     RejectionAction,
     SessionState,
 )
+from app.domain.scoped_methods import missing_scoped_methods
 from app.rules.engine import RuleEngine, compact
 
 
@@ -110,6 +113,12 @@ def apply_menu_restore(
                 "历史菜单已不满足当前已知约束（过敏/忌口/不辣等），"
                 "无法直接恢复；请调整要求后重试。"
             )
+    if (
+        any(not is_main_meal_recipe(recipe) for recipe in chosen)
+        or not composition_satisfied(chosen, state.constraints)
+        or missing_scoped_methods(chosen, state.constraints.scoped_methods, required_only=True)
+    ):
+        return "历史菜单不满足当前荤素结构或明确做法要求，无法直接恢复；请核对要求后重试。"
     # Undo exactly the rejection delta that rejected this menu revision.
     undo_ids: set[str] = set()
     undo_actions = []

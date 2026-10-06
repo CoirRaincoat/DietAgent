@@ -22,7 +22,9 @@ from app.infrastructure.sessions import SessionStore
 
 ANNOTATED_SOURCE_SHA256 = "495201bfb121bc0e7389fe849a42ec183ff07c9e7ce71b0197e92532ba16c010"
 
-# Human annotations for exactly the source version above. Every item is one
+# Manually specified fixtures for exactly the source version above. Their
+# existence does not establish independently reviewed human-label provenance.
+# Every item is one
 # turn. No menu, recipe ID, nutrition answer, or generated health fact is fixed.
 ANNOTATIONS: dict[int, list[dict]] = {
     1: [{"meal_type": "晚餐"}],
@@ -58,7 +60,7 @@ ANNOTATIONS: dict[int, list[dict]] = {
 
 
 class FixtureLLM(BaseLLM):
-    """A finite queue of human annotations; no network methods or fallback."""
+    """Finite manually specified fixtures; no human-review or NLU claim."""
 
     def __init__(self, annotations: list[dict]):
         self.intents = deque(Intent.model_validate(value) for value in annotations)

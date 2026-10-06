@@ -22,6 +22,7 @@ from time import perf_counter
 from app.agent.service import MealAgent
 from app.infrastructure.data import PROJECT_ROOT, RECIPE_PATH, load_catalog
 from app.infrastructure.sessions import SessionStore
+from evaluation.no_spicy_oracle import no_spicy_findings
 from evaluation.offline import FixtureLLM
 from evaluation.offline import replay as replay_dialogues
 
@@ -58,7 +59,6 @@ IGNORED_PHRASES = {
     "鸡蛋": ["蛋白质", "蛋白酶", "植物蛋白"],
 }
 UNKNOWN_COMPOSITES = "调味料 调料包 酱料包 火锅底料 咖喱块 浓汤宝 复合调味料 沙拉酱 沙茶酱 蛋白粉 不详 未知".split()
-SPICY = "辣椒 辣油 辣酱 小米椒 朝天椒 剁椒 泡椒 干红椒 红油 豆瓣酱 哈瓦那椒 辣粉 青尖椒 尖椒 杭椒 美人椒 二荆条 泡红椒 线椒".split()
 
 
 def _source_rows() -> dict[int, dict[str, str]]:
@@ -85,7 +85,9 @@ def check_source(recipe, item, rows: dict[int, dict[str, str]]) -> bool:
     )
 
 
-def check_allergens(text: str, allergies: list[str], no_spicy: bool = False) -> dict:
+def check_allergens(
+    text: str, allergies: list[str], no_spicy: bool = False, *, labels: list[str] | None = None,
+) -> dict:
     """Return only check codes; do not export an individual's allergy names."""
     failures = []
     unknown = 0
@@ -102,8 +104,12 @@ def check_allergens(text: str, allergies: list[str], no_spicy: bool = False) -> 
             failures.append("known_allergen_in_source")
     if allergies and any(term in text for term in UNKNOWN_COMPOSITES):
         failures.append("unknown_composite_with_allergy")
-    if no_spicy and any(term in text for term in SPICY):
-        failures.append("spicy_ingredient_with_no_spicy_constraint")
+    if no_spicy:
+        evidence = no_spicy_findings(text, labels or [])
+        if any(not item.startswith("成分不明:") for item in evidence):
+            failures.append("spicy_ingredient_with_no_spicy_constraint")
+        if any(item.startswith("成分不明:") for item in evidence):
+            failures.append("unverified_no_spicy_composite")
     return {
         "status": FAIL if failures else INSUFFICIENT if unknown else PASS,
         "failures": sorted(set(failures)), "unknown_allergy_values": unknown,
@@ -205,7 +211,10 @@ async def _profile_case(case: dict, catalog, rows: dict, directory: Path) -> dic
                     failures["source"].append(f"turn_{number}_source_mismatch")
                     continue
                 source_text = rows[recipe.source_row]["食材清单"] + rows[recipe.source_row]["烹饪步骤"]
-                oracle = check_allergens(source_text, profile.allergies, state.constraints.no_spicy)
+                oracle = check_allergens(
+                    source_text, profile.allergies, state.constraints.no_spicy,
+                    labels=re.split(r"[、,，;；\n]+", rows[recipe.source_row]["label"]),
+                )
                 failures["allergy"].extend(oracle["failures"])
                 if "辣椒" in source_text:
                     failures["allergy"].append("explicit_exclusion_in_source")
@@ -267,6 +276,7 @@ def _dialogue_results(report: dict, catalog, rows: dict) -> list[dict]:
                 oracle = check_allergens(
                     row["食材清单"] + row["烹饪步骤"], turn["constraints"]["allergies"],
                     turn["constraints"]["no_spicy"],
+                    labels=re.split(r"[、,，;；\n]+", row["label"]),
                 )
                 allergy_failures.extend(oracle["failures"])
         failures = {

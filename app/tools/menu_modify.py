@@ -13,6 +13,9 @@ class MenuModifyTool:
         current: list[Recipe] | None = None, replace_slot: int | None = None,
         reject_ids: set[str] | None = None,
         query_terms: list[str] | None = None,
+        recheck_soft_preferences: bool = True,
+        recent_recipe_names: list[list[str]] | None = None,
+        allow_adjacent_rotation: bool = False,
     ) -> PlanResult:
         return self.planner.plan(
             candidates,
@@ -21,4 +24,7 @@ class MenuModifyTool:
             replace_slot=replace_slot,
             reject_ids=reject_ids,
             query_terms=query_terms,
+            recheck_soft_preferences=recheck_soft_preferences,
+            recent_recipe_names=recent_recipe_names,
+            allow_adjacent_rotation=allow_adjacent_rotation,
         )

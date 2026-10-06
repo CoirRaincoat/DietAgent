@@ -3,6 +3,7 @@
 from functools import lru_cache
 
 from app.domain.models import Constraints, Ingredient, Recipe
+from app.domain.recipe_origin import display_source_row, is_generated_recipe
 from app.infrastructure.data import _has_protein_source
 from app.nutrition.models import (
     GoalMatch,
@@ -98,19 +99,8 @@ def _source_names(contributions: list[IngredientContribution], role: str) -> lis
 def _goal_matches(recipes: list[Recipe], constraints: Constraints,
                   contributions: list[IngredientContribution]) -> list[GoalMatch]:
     rules = _rules()
-    names = _unique(item.name for recipe in recipes for item in recipe.ingredients)
-    methods = _unique(method for recipe in recipes for method in recipe.methods)
-    # Title-derived categories alone cannot create nutrient or goal evidence.
-    categories = {
-        "protein": _source_names(contributions, "protein"),
-        "staple": _source_names(contributions, "carbohydrate"),
-        "vegetable": _unique(
-            item.ingredient_name for item in contributions
-            if "dietary_fiber" in item.roles
-            and any(recipe.recipe_id == item.recipe_id and "vegetable" in recipe.categories
-                    for recipe in recipes)
-        ),
-    }
+    # Goal ordering and explanation inspect the same source evidence. Nutrient
+    # source contributions remain separate and never turn into nutrient doses.
     output = []
     for goal in _unique(constraints.health_goals):
         rule = rules.config["health_goals"].get(goal)
@@ -120,26 +110,49 @@ def _goal_matches(recipes: list[Recipe], constraints: Constraints,
                 limitation=f"健康目标『{goal}』暂无已配置规则，不能判断匹配程度。",
             ))
             continue
-        preferred = [name for name in names if _has(name, rule.get("prefer_terms", []))
-                     and not _has(name, _CONDIMENT_MARKERS)
-                     and any(item.ingredient_name == name for item in contributions)
-                     and ("protein" not in rule.get("prefer_categories", [])
-                          or name in categories["protein"])]
-        preferred += [name for category in rule.get("prefer_categories", [])
-                      for name in categories.get(category, [])]
-        discouraged = [name for name in names if _has(name, rule.get("discourage_terms", []))]
-        good_methods = [method for method in methods if method in rule.get("prefer_methods", [])]
-        bad_methods = [method for method in methods if method in rule.get("discourage_methods", [])]
+        evidence = [(recipe, rules.goal_evidence(recipe, goal)) for recipe in recipes]
+        preferred = _unique(name for _, item in evidence if item is not None
+                            for name in [*item.preferred_foods, *item.category_foods])
+        ranked_preferred = _unique(
+            name for _, item in evidence if item is not None
+            for name in [
+                *(item.category_foods if item.category_rank_enabled else ()),
+                *(name for name in item.preferred_foods
+                  if item.preferred_rank_terms is None
+                  or any(contains_term(name, term) for term in item.preferred_rank_terms)),
+            ]
+        )
+        auxiliary_foods = [name for name in preferred if name not in ranked_preferred]
+        discouraged = _unique(name for _, item in evidence if item is not None
+                              for name in item.discouraged_foods)
+        attention = _unique(name for _, item in evidence if item is not None for name in item.attention_foods)
+        good_methods = _unique(method for _, item in evidence if item is not None for method in item.good_methods)
+        bad_methods = _unique(method for _, item in evidence if item is not None for method in item.bad_methods)
         reasons = []
-        if preferred:
-            reasons.append("食材种类符合当前定性偏好：" + "、".join(_unique(preferred)) + "。")
+        if ranked_preferred:
+            # Membership in a category/ranking reference is not proof of the
+            # amount, culinary main ingredient or share of an individual food.
+            reasons.append("排序规则所参考的已声明食材：" + "、".join(ranked_preferred) + "；未核主辅比例，不据此评整道菜的健康功效。")
+        if auxiliary_foods:
+            reasons.append("其他已声明食材：" + "、".join(auxiliary_foods) + "；仅保留来源事实，不凭辅料给整道菜加健康分。")
         if good_methods:
             reasons.append("记录的做法符合当前定性偏好：" + "、".join(good_methods) + "；调味与用量仍需核对。")
         if discouraged:
             reasons.append("当前目标需关注的配料：" + "、".join(discouraged) + "；不据此判定摄入量。")
+        if attention:
+            reasons.append("含钠来源待核：" + "、".join(attention) + "；仅提醒，不因出现而扣分，不判定高钠或低钠。")
         if bad_methods:
             reasons.append("当前目标需关注的做法：" + "、".join(bad_methods) + "；不能由做法推算热量。")
-        status = "caution" if discouraged or bad_methods else (
+        for recipe, item in evidence:
+            if item is not None and item.raw_cautions:
+                reasons.append(f"《{recipe.name}》原始配料声明需关注：" + "、".join(item.raw_cautions) + "；解析不完整时不能遗漏。")
+            if item is not None and item.step_cautions:
+                reasons.append(f"《{recipe.name}》步骤声明需关注：" + "、".join(item.step_cautions) + "；未计算添加量。")
+            if item is not None and item.raw_attention:
+                reasons.append(f"《{recipe.name}》原始配料声明含钠来源待核：" + "、".join(item.raw_attention) + "；未核品牌、用量与分餐，仅提醒、不因出现而扣分。")
+            if item is not None and item.step_attention:
+                reasons.append(f"《{recipe.name}》步骤声明含钠来源待核：" + "、".join(item.step_attention) + "；未计算添加量，仅提醒、不因出现而扣分。")
+        status = "caution" if any(item is not None and item.has_caution for _, item in evidence) else (
             "preference_match" if preferred or good_methods else "insufficient_data"
         )
         sources = [NutritionSource(source_id=source_id,
@@ -147,7 +160,7 @@ def _goal_matches(recipes: list[Recipe], constraints: Constraints,
                                    url=rules.config["sources"][source_id]["url"])
                    for source_id in rule.get("sources", [])]
         output.append(GoalMatch(
-            goal=goal, status=status, ingredient_names=_unique([*preferred, *discouraged]),
+            goal=goal, status=status, ingredient_names=_unique([*preferred, *discouraged, *attention]),
             methods=_unique([*good_methods, *bad_methods]), reasons=reasons,
             limitation=rule["note"], sources=sources,
         ))
@@ -165,7 +178,7 @@ def analyze_recipe(recipe: Recipe, constraints: Constraints) -> RecipeNutrition:
         roles = _roles(ingredient)
         if roles:
             contributions.append(IngredientContribution(
-                recipe_id=recipe.recipe_id, source_row=recipe.source_row,
+                recipe_id=recipe.recipe_id, source_row=display_source_row(recipe),
                 ingredient_name=ingredient.name, roles=roles,
                 explanation="根据食材名称识别为" + "、".join(_ROLE_LABELS[role] for role in roles)
                             + "；未推算营养含量。",
@@ -203,12 +216,15 @@ def analyze_recipe(recipe: Recipe, constraints: Constraints) -> RecipeNutrition:
     suitable = [label + "可追溯到：" + "、".join(source_names[role]) + "；份量和实际摄入量待确认。"
                 for role, label in _ROLE_LABELS.items() if source_names[role]] if decision.allowed else []
     return RecipeNutrition(
-        recipe_id=recipe.recipe_id, source_row=recipe.source_row,
+        recipe_id=recipe.recipe_id, source_row=display_source_row(recipe),
         protein_sources=source_names["protein"], carbohydrate_sources=source_names["carbohydrate"],
         fat_sources=source_names["fat"], dietary_fiber=source_names["dietary_fiber"],
         ingredient_contributions=contributions,
         goal_matches=_goal_matches([recipe], constraints, contributions),
-        suitable_reasons=suitable, risks=risks, limitations=list(_LIMITATIONS),
+        suitable_reasons=suitable, risks=risks, limitations=list(_LIMITATIONS) + (
+            ["本菜为本地生成方案，未经过厨房试做；食材仅为方案声明，不是原库配方或实测营养依据。"]
+            if is_generated_recipe(recipe) else []
+        ),
     )
 
 

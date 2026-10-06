@@ -3,7 +3,9 @@
 import re
 
 from app.domain.cards import CookingStep, DishCard, RecipeProvenance
+from app.domain.cooking_methods import main_cooking_methods
 from app.domain.models import Recipe
+from app.domain.recipe_origin import display_source_row, generator_version, is_generated_recipe
 from app.infrastructure.data import LABEL_ALLOWLIST
 
 # Culinary categories only. Protein evidence belongs in the separately checked
@@ -16,16 +18,18 @@ _CATEGORY_BADGES = {
     "drink": "饮品类",
     "component": "加工组件",
 }
-_METHOD_ALLOWLIST = {"蒸", "煮", "炖", "炒", "烤", "煎", "炸", "焖", "拌", "榨汁"}
+_METHOD_ALLOWLIST = {"蒸", "煮", "炖", "炒", "烤", "煎", "炸", "焖", "烧", "焯", "拌", "榨汁"}
 
 
 def build_card(recipe: Recipe) -> DishCard:
     """Display source metadata; unsupported display facts stay null."""
     categories = [_CATEGORY_BADGES[value] for value in recipe.categories
                   if value in _CATEGORY_BADGES]
-    methods = [value for value in recipe.methods if value in _METHOD_ALLOWLIST]
+    methods = [value for value in main_cooking_methods(recipe) if value in _METHOD_ALLOWLIST]
     labels = [value for value in recipe.labels if value in LABEL_ALLOWLIST]
     badges = list(dict.fromkeys([*categories, *methods, *labels]))
+    if is_generated_recipe(recipe):
+        badges.insert(0, "新生成方案·待试做")
     subtitle = " · ".join(list(dict.fromkeys([*categories, *methods]))[:3])
     return DishCard(
         title=recipe.name,
@@ -48,6 +52,8 @@ def split_cooking_steps(steps: str) -> list[CookingStep]:
 def recipe_provenance(recipe: Recipe) -> RecipeProvenance:
     return RecipeProvenance(
         recipe_id=recipe.recipe_id,
-        source_row=recipe.source_row,
+        source_row=display_source_row(recipe),
         fingerprint=recipe.fingerprint,
+        origin="generated" if is_generated_recipe(recipe) else "catalog",
+        generator_version=generator_version(recipe),
     )

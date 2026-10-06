@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -205,3 +206,250 @@ async def test_judge_client_rejects_invalid_output() -> None:
         )
         with pytest.raises(JudgeError, match="invalid structured output"):
             await client.judge({"case_id": "case-1"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [1800, 8192])
+async def test_judge_client_sends_configured_completion_budget(budget: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["max_tokens"] == budget
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": _judgment("tie").model_dump_json()},
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = JudgeClient(
+            api_key="secret",
+            base_url="https://judge.example/v1",
+            model="judge-model",
+            max_tokens=budget,
+            client=transport,
+        )
+        assert (await client.judge({"case_id": "case-1"})).winner == "tie"
+
+
+@pytest.mark.parametrize("budget", [0, -1, True, 1.5])
+def test_judge_client_rejects_invalid_completion_budget(budget: int) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        JudgeClient(
+            api_key="secret",
+            base_url="https://judge.example/v1",
+            model="judge-model",
+            max_tokens=budget,
+        )
+
+
+@pytest.mark.asyncio
+async def test_judge_client_rejects_truncation_even_when_json_is_valid() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": _judgment("tie").model_dump_json()},
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = JudgeClient(
+            api_key="secret",
+            base_url="https://judge.example/v1",
+            model="judge-model",
+            client=transport,
+        )
+        with pytest.raises(JudgeError, match="token budget"):
+            await client.judge({"case_id": "case-1"})
+
+
+@pytest.mark.parametrize("cli_budget,expected", [(None, 8192), (4096, 4096)])
+def test_judge_cli_uses_budget_and_writes_complete_mocked_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cli_budget: int | None, expected: int
+) -> None:
+    from evaluation import ai_judge
+
+    baseline = _write_bundle(tmp_path / "baseline")
+    candidate = _write_bundle(tmp_path / "candidate")
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["max_tokens"] == expected
+        requests.append(payload)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": _judgment("tie").model_dump_json()},
+                    }
+                ]
+            },
+        )
+
+    original_client = httpx.AsyncClient
+
+    def mocked_client() -> httpx.AsyncClient:
+        return original_client(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(ai_judge.httpx, "AsyncClient", mocked_client)
+    monkeypatch.setenv("JUDGE_API_KEY", "secret")
+    monkeypatch.setenv("JUDGE_BASE_URL", "https://judge.example/v1")
+    monkeypatch.setenv("JUDGE_MODEL", "judge-model")
+    monkeypatch.setenv("JUDGE_MAX_TOKENS", "8192")
+    output = tmp_path / "judge"
+    arguments = [
+        "--baseline-report",
+        str(baseline),
+        "--candidate-report",
+        str(candidate),
+        "--output-dir",
+        str(output),
+    ]
+    if cli_budget is not None:
+        arguments += ["--max-tokens", str(cli_budget)]
+    assert ai_judge.main(arguments) == 0
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["judge"]["max_tokens"] == expected
+    assert report["summary"]["wins"]["tie"] == 1
+    assert len(requests) == 2
+    assert (output / "report.md").is_file()
+    assert (output / "judgments.jsonl").is_file()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        ("timeout", "timed out"),
+        ("network", "network error"),
+        ("http", "HTTP 429"),
+        ("incomplete", "invalid structured output"),
+    ],
+)
+async def test_judge_client_safe_failure_paths(failure: str, expected: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if failure == "timeout":
+            raise httpx.ReadTimeout("timeout", request=request)
+        if failure == "network":
+            raise httpx.ConnectError("unreachable", request=request)
+        if failure == "http":
+            return httpx.Response(429)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "content_filter",
+                        "message": {"content": "{}"},
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = JudgeClient(
+            api_key="secret",
+            base_url="https://judge.example/v1",
+            model="judge-model",
+            client=transport,
+        )
+        with pytest.raises(JudgeError, match=expected):
+            await client.judge({"case_id": "case-1"})
+
+
+@pytest.mark.parametrize(
+    "changes,expected",
+    [
+        ({"api_key": ""}, "required"),
+        ({"model": ""}, "required"),
+        ({"timeout_seconds": 0}, "positive"),
+        ({"base_url": "ftp://judge.example"}, "HTTP"),
+    ],
+)
+def test_judge_client_rejects_invalid_settings(changes: dict[str, Any], expected: str) -> None:
+    settings = {"api_key": "secret", "base_url": "https://judge.example", "model": "judge-model"}
+    with pytest.raises(ValueError, match=expected):
+        JudgeClient(**(settings | changes))
+
+
+@pytest.mark.parametrize(
+    "damage,expected",
+    [
+        ("failed", "deterministic failures"),
+        ("no_cases", "does not contain cases"),
+        ("invalid_case", "invalid case"),
+        ("duplicate_case", "Duplicate case"),
+        ("turn_count", "Turn count differs"),
+        ("turn_id", "Turn identity differs"),
+        ("message", "User message differs"),
+        ("missing_response", "Missing raw response"),
+        ("non_object_response", "Response must be an object"),
+        ("duplicate_response", "Duplicate response"),
+        ("invalid_response", "Invalid response record"),
+        ("missing_file", "Cannot read responses"),
+    ],
+)
+def test_load_comparison_blocks_damaged_evidence(
+    tmp_path: Path, damage: str, expected: str
+) -> None:
+    baseline = _write_bundle(tmp_path / "baseline")
+    candidate = _write_bundle(tmp_path / "candidate")
+    report = json.loads(candidate.read_text(encoding="utf-8"))
+    responses = candidate.parent / "responses.jsonl"
+    if damage == "failed":
+        report["summary"]["failed"] = 1
+    elif damage == "no_cases":
+        report["cases"] = None
+    elif damage == "invalid_case":
+        report["cases"][0]["case_id"] = ""
+    elif damage == "duplicate_case":
+        report["cases"].append(report["cases"][0])
+    elif damage == "turn_count":
+        report["cases"][0]["turns"].append(report["cases"][0]["turns"][0])
+    elif damage == "turn_id":
+        report["cases"][0]["turns"][0]["turn"] = 2
+    elif damage == "message":
+        report["cases"][0]["turns"][0]["message"] = "不同输入"
+    elif damage == "missing_response":
+        responses.write_text("", encoding="utf-8")
+    elif damage == "non_object_response":
+        responses.write_text(
+            json.dumps({"case_id": "case-1", "turn": 1, "response": []}), encoding="utf-8"
+        )
+    elif damage == "duplicate_response":
+        responses.write_text(responses.read_text(encoding="utf-8") * 2, encoding="utf-8")
+    elif damage == "invalid_response":
+        responses.write_text("not JSON\n", encoding="utf-8")
+    elif damage == "missing_file":
+        responses.unlink()
+    candidate.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match=expected):
+        load_comparison(baseline, candidate)
+
+
+@pytest.mark.parametrize("text", ['{"same":1,"same":2}', '{"value":NaN}', "[]"])
+def test_judge_report_parser_rejects_ambiguous_json(tmp_path: Path, text: str) -> None:
+    from evaluation.ai_judge import _load_json
+
+    path = tmp_path / "report.json"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError):
+        _load_json(path)
+
+
+def test_judge_summary_rejects_no_judgments() -> None:
+    with pytest.raises(ValueError, match="At least one"):
+        summarize([])

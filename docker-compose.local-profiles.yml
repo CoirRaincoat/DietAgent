@@ -1,0 +1,13 @@
+# Explicit opt-in. The private file stays outside the image and public source.
+# Use with docker-compose.yml; see docs/LOCAL_OFFICIAL_IDS.md.
+services:
+  backend:
+    environment:
+      LOCAL_PROFILE_PATH: /local-input/profiles.json
+    volumes:
+      - type: bind
+        source: ${LOCAL_PROFILE_HOST_PATH:?Set LOCAL_PROFILE_HOST_PATH to the local JSON file}
+        target: /local-input/profiles.json
+        read_only: true
+        bind:
+          create_host_path: false

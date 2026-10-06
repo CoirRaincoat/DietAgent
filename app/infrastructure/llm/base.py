@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from uuid import uuid4
 
+from app.domain.generated_recipe import RecipeDraft
 from app.domain.models import Intent, SessionState, UserProfile
 
 
@@ -63,6 +64,10 @@ class LLMOutputError(LLMUnavailable):
 
 
 class BaseLLM(ABC):
+    async def propose_recipe(self, user_messages: list[str]) -> RecipeDraft | None:
+        """Optional proposal capability; default never calls a remote provider."""
+        return None
+
     @abstractmethod
     async def parse(
         self, message: str, state: SessionState, profile: UserProfile

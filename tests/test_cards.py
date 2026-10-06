@@ -40,7 +40,7 @@ def test_badges_cannot_promote_unknown_or_health_claims():
 
 
 def test_missing_metadata_has_neutral_subtitle_and_null_estimates():
-    source = sample_recipe(categories=[], methods=[], labels=[], steps="煮10分钟，供2人食用。")
+    source = sample_recipe(categories=[], methods=[], labels=[], steps="制作完成，供2人食用。")
     card = build_card(source)
     assert card.subtitle == "查看食材与做法"
     assert card.badges == []
@@ -69,6 +69,7 @@ def test_provenance_is_exact_source_identity():
     provenance = recipe_provenance(source)
     assert provenance.model_dump() == {
         "recipe_id": source.recipe_id, "source_row": source.source_row, "fingerprint": source.fingerprint,
+        "origin": "catalog", "generator_version": None,
     }
     assert RecipeProvenance.model_validate_json(provenance.model_dump_json()) == provenance
 

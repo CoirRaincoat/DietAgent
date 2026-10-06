@@ -74,10 +74,15 @@ def test_public_suite_is_versioned_and_uses_only_synthetic_profiles() -> None:
     suite = load_suite(DEFAULT_SUITE_PATH)
 
     assert suite.schema_version == "2.0"
-    assert suite.dataset_version == "synthetic-regression-v2"
-    assert len(suite.cases) >= 8
+    assert suite.dataset_version == "synthetic-regression-v3"
+    assert len(suite.cases) == 30
     assert {case.user_id for case in suite.cases} <= {900001, 900002, 900003}
     assert {case.rubric for case in suite.cases} == {"basic", "complex", "interaction"}
+    assert {
+        rubric: sum(case.rubric == rubric for case in suite.cases)
+        for rubric in ("basic", "complex", "interaction")
+    } == {"basic": 8, "complex": 8, "interaction": 14}
+    assert sum(len(case.turns) for case in suite.cases if case.measure_performance) == 10
 
 
 def test_loader_rejects_non_synthetic_profile_ids(tmp_path) -> None:
@@ -102,6 +107,46 @@ def test_loader_rejects_non_synthetic_profile_ids(tmp_path) -> None:
     )
 
     with pytest.raises(ValueError, match="synthetic profile"):
+        load_suite(path)
+
+
+def test_loader_rejects_empty_positive_food_requirement(tmp_path) -> None:
+    path = tmp_path / "bad-requirement.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "dataset_version": "bad",
+                "data_scope": "synthetic",
+                "cases": [
+                    {
+                        "case_id": "empty-requirement",
+                        "rubric": "basic",
+                        "user_id": 900001,
+                        "turns": [
+                            {
+                                "message": "test",
+                                "expect": {
+                                    "status": "ok",
+                                    "catalog_traceability": True,
+                                    "independent_food_rules": [],
+                                    "independent_food_requirements": [
+                                        {
+                                            "label": "牛肉偏好",
+                                            "required_terms": [],
+                                        }
+                                    ],
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="empty food requirement"):
         load_suite(path)
 
 
@@ -301,6 +346,37 @@ def _source_dish(recipe, slot=1):
     return item
 
 
+def test_independent_positive_food_requirement_uses_source_recipe(recipe_catalog):
+    beef_terms = ["牛肉", "牛腱", "牛腩", "肥牛", "牛里脊"]
+    beef = next(recipe for recipe in recipe_catalog.values() if recipe.source_row == 462)
+    without_beef = next(
+        recipe
+        for recipe in recipe_catalog.values()
+        if not any(term in recipe.raw_ingredients + recipe.steps for term in beef_terms)
+    )
+    expected = {
+        "catalog_traceability": True,
+        "independent_food_rules": [],
+        "independent_food_requirements": [
+            {
+                "label": "牛肉偏好（预期事实）",
+                "required_terms": beef_terms,
+            }
+        ],
+    }
+
+    def requirement_check(recipe):
+        result = _result([recipe.recipe_id])
+        result["menu"] = [_source_dish(recipe)]
+        checks = evaluate_turn(result, expected, previous_menu_ids=None, recipes=recipe_catalog)
+        return next(check for check in checks if check["check"] == "independent_food_requirements")
+
+    assert requirement_check(beef)["passed"] is True
+    missing = requirement_check(without_beef)
+    assert missing["passed"] is False
+    assert missing["actual"]["missing"] == ["牛肉偏好（预期事实）"]
+
+
 def _multi_person_result(recipe_catalog):
     # Four explicitly selected source recipes without the declared restrictions.
     rows = (37, 154, 299, 1809)
@@ -485,8 +561,10 @@ async def test_failed_performance_is_unscored_and_counts_skipped_turns(
         )
 
     monkeypatch.setattr(regression, "measure_stream_turn", measure)
+    # Keep the injected failure positions tied to the original four-request fixture.
+    legacy_suite = load_suite(DEFAULT_SUITE_PATH.with_name("regression_v2.json"))
     performance = await regression.run_performance_cases(
-        load_suite(), base_url="http://test", timeout_seconds=1,
+        legacy_suite, base_url="http://test", timeout_seconds=1,
     )
     assert performance["counts"] == expected_counts
     assert performance["threshold_result_valid"] is False

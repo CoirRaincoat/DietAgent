@@ -32,8 +32,8 @@ def recipe(
 
 def test_balanced_menu_reports_categories_methods_and_temperature_evidence() -> None:
     menu = [
-        recipe("清蒸鱼", categories=["protein"], methods=["蒸"]),
-        recipe("炒青菜", categories=["vegetable"], methods=["炒"]),
+        recipe("清蒸鱼", categories=["protein"], methods=["蒸"], steps="鱼蒸熟后装盘。"),
+        recipe("炒青菜", categories=["vegetable"], methods=["炒"], steps="青菜炒熟后装盘。"),
         recipe(
             "凉拌黄瓜",
             name="凉拌黄瓜",

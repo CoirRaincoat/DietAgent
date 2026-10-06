@@ -1,14 +1,31 @@
 """Deterministic, source-aware screening; health goals never waive hard rules."""
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from app.domain.context_exclusions import context_exclusion_hits
+from app.domain.health_evidence import HealthEvidence, HealthRule, health_evidence
+from app.domain.ingredient_disclosure import ingredient_disclosures
+from app.domain.light_preparation import light_preparation_evidence, light_preparation_warning
+from app.domain.matching_tags import (
+    explicit_non_spicy_flavor_preference,
+    flavor_exclusion_hits,
+    supported_flavor_preferences,
+)
+from app.domain.meal_context import infant_only_source
+from app.domain.meal_roles import is_main_meal_recipe, is_non_meal_role_exclusion
+from app.domain.menu_group_preferences import is_menu_group_preference, menu_group_matches
 from app.domain.models import Constraints, Recipe
+from app.domain.source_preparation import grain_completion_issue
+from app.domain.source_soups import undrained_pot_reference
+from app.rules.diet import diet_reasons
+from app.rules.non_spicy import non_spicy_reasons
+from app.rules.sauce_composition import unresolved_sauce_evidence
 
 DEFAULT_RULES_PATH = Path(__file__).resolve().parents[2] / "configs" / "rules.yaml"
 
@@ -37,9 +54,11 @@ def contains_term(text: str, term: str) -> bool:
 
 
 class RuleEngine:
-    def __init__(self, config_path: Path | None = None):
+    def __init__(self, config_path: Path | None = None, *, experiment_category_scope: bool = False):
         path = Path(config_path) if config_path is not None else DEFAULT_RULES_PATH
         self.config: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # Explicit source-ranking ablation only; API/service never opt in.
+        self.experiment_category_scope = experiment_category_scope
         self.aliases: dict[str, list[str]] = self.config["aliases"]
         # Culinary membership is directional: chicken wings belong to chicken,
         # but are not interchangeable with chicken breast in strict inventory.
@@ -56,6 +75,7 @@ class RuleEngine:
             self._known_foods.update(value["terms"])
         for value in self.config["health_goals"].values():
             self._known_foods.update(value.get("discourage_terms", []))
+            self._known_foods.update(value.get("attention_terms", []))
             self._known_foods.update(value.get("prefer_terms", []))
         self._known_foods.update(self.config["spicy_terms"])
         self._known_food_names = {self.canonical_food(value) for value in self._known_foods}
@@ -91,7 +111,8 @@ class RuleEngine:
         """No substring hit is not proof of safety for an unsupported food name."""
         return [
             value for value in constraints.excluded_ingredients
-            if not self._allergen_keys(value)
+            if not is_non_meal_role_exclusion(value)
+            and not self._allergen_keys(value)
             and self.canonical_food(value) not in self._known_food_names
         ]
 
@@ -101,6 +122,35 @@ class RuleEngine:
         return "\n".join(
             [recipe.raw_ingredients, *(i.name for i in recipe.ingredients), recipe.steps]
         )
+
+    def goal_evidence(self, recipe: Recipe, goal: str) -> HealthEvidence | None:
+        """Return qualitative source evidence, or None for an unconfigured goal."""
+        rule = self.config["health_goals"].get(goal)
+        if rule is None:
+            return None
+        configured = HealthRule.from_mapping(rule)
+        if self.experiment_category_scope:
+            configured = replace(configured, scope_category_to_role=True)
+        # Ordinary food-reference ranking and the stricter, source-authorized
+        # meat replacement are different decisions. The role gate excludes an
+        # incidental binder/egg-product token here; the existing caution terms
+        # remain independently visible. Do not erase a declared tofu body just
+        # because its recipe also contains sugar, or certify the whole dish.
+        return health_evidence(recipe, configured)
+
+    def health_scores(self, recipe: Recipe, constraints: Constraints) -> tuple[int, ...]:
+        """Keep separate goal preferences; unknown goals never earn points."""
+        return tuple(
+            evidence.score if (evidence := self.goal_evidence(recipe, goal)) is not None else 0
+            for goal in dict.fromkeys(constraints.health_goals)
+        )
+
+    def soft_goal_scores(self, recipe: Recipe, constraints: Constraints) -> tuple[int, ...]:
+        """Separate configured health goals and supported preparation preferences."""
+        scores = self.health_scores(recipe, constraints)
+        if "清淡" in supported_flavor_preferences(constraints.preferences):
+            scores += (int(light_preparation_evidence(recipe).method_reference),)
+        return scores
 
     def _allergen_matches(self, text: str, key: str) -> list[str]:
         if key.startswith("specific:"):
@@ -148,6 +198,16 @@ class RuleEngine:
             return sorted({term for key in groups for term in self._allergen_matches(text, key)})
         return [term for term in self.aliases_for(value) if contains_term(text, term)]
 
+    def preference_matches(self, recipe: Recipe, value: str) -> list[str]:
+        """Source-backed meal groups only on the positive preference axis.
+
+        food_matches remains the separate safety/inventory resolver. A group
+        match must not turn an unknown allergy or exclusion into permission.
+        """
+        if is_menu_group_preference(value):
+            return menu_group_matches(recipe, value)
+        return self.food_matches(recipe, value)
+
     def _step_ingredients(self, text: str) -> set[str]:
         # Longest-first masking avoids treating 鸡精 as 鸡 or 芝麻油 as 油.
         remaining = text.replace("鱼香", "").replace("鱼眼泡", "")
@@ -170,6 +230,49 @@ class RuleEngine:
     def evaluate(self, recipe: Recipe, constraints: Constraints) -> RuleDecision:
         reasons: list[str] = []
         warnings: list[str] = []
+        food_exclusions = [
+            value for value in constraints.excluded_ingredients
+            if not is_non_meal_role_exclusion(value)
+        ]
+        role_exclusions = [
+            value for value in constraints.excluded_ingredients
+            if is_non_meal_role_exclusion(value)
+        ]
+        if role_exclusions and not is_main_meal_recipe(recipe):
+            reasons.append(
+                "菜品类别排除「" + "、".join(role_exclusions)
+                + "」需可核验正餐角色；该记录为非正餐或正餐角色未确认。"
+            )
+        unknown_sauces = unresolved_sauce_evidence(recipe, self._known_foods)
+        if unknown_sauces:
+            source = "；".join(unknown_sauces)
+            non_spicy = constraints.no_spicy or explicit_non_spicy_flavor_preference(
+                constraints.preferences
+            )
+            if (
+                non_spicy
+                or constraints.allergies
+                or food_exclusions
+                or constraints.diet_mode in {"ovo_lacto_vegetarian", "vegan"}
+            ):
+                reasons.append("未能完整核验源酱汁／蘸料成分，无法确认符合已声明饮食限制：" + source)
+            else:
+                warnings.append("源酱汁／蘸料成分尚未完整核验，不保证配方或饮食适配：" + source)
+        if "清淡" in supported_flavor_preferences(constraints.preferences):
+            if warning := light_preparation_warning(recipe):
+                warnings.append(warning)
+        reasons.extend(flavor_exclusion_hits(recipe, constraints.preferences))
+        reasons.extend(context_exclusion_hits(recipe, constraints))
+        if infant_only_source(recipe):
+            reasons.append("源菜谱明确面向婴儿/宝宝专用准备，不用于普通共享正餐；未提供婴幼儿专餐规划能力。")
+        if issue := grain_completion_issue(recipe.name, (i.name for i in recipe.ingredients), recipe.steps):
+            reasons.append(issue)
+        if undrained_pot_reference(recipe.name, (i.name for i in recipe.ingredients), recipe.steps):
+            pot_issue = "原方煲类含水或汤底并经煮炖，未见最终沥汤或收汁依据，成品汤汁形态待核。"
+            if constraints.soup_count == 0:
+                reasons.append(pot_issue + "当前明确不要汤，不能用非汤类别标签证明满足。")
+            else:
+                warnings.append(pot_issue + "未将其自动改判为汤或推算汤数。")
         if not recipe.eligible or not recipe.steps.strip() or not recipe.ingredients:
             reasons.append("菜谱缺少可用食材或步骤，或属于不可直接推荐的加工组件。")
         unresolved = self.unresolved_allergies(constraints)
@@ -180,8 +283,12 @@ class RuleEngine:
             reasons.append("排除食材缺少已支持映射，需要澄清：" + "、".join(unresolved_exclusions))
         if constraints.allergies and "unparsed_ingredients" in recipe.quality_flags:
             reasons.append("食材解析不完整，无法核对过敏限制。")
+        reasons.extend(diet_reasons(recipe, constraints))
+        if constraints.diet_mode != "omnivore":
+            warnings.append("整餐素食按已声明原料和步骤核对；未验证品牌完整配方、漏列食材或交叉接触。")
 
         text = self._food_text(recipe)
+        warnings.extend(ingredient_disclosures(recipe))
         for allergy in constraints.allergies:
             matched = sorted({term for key in self._allergen_keys(allergy)
                               for term in self._allergen_matches(text, key)})
@@ -192,7 +299,7 @@ class RuleEngine:
                 reasons.append(
                     f"复合配料来源不明，无法核对过敏限制「{allergy}」：{'、'.join(uncertain)}。"
                 )
-        if constraints.allergies or constraints.excluded_ingredients:
+        if constraints.allergies or food_exclusions:
             uncertain = [term for term in self.config["uncertain_composites"]
                          if contains_term(text, term)]
             if uncertain:
@@ -200,7 +307,7 @@ class RuleEngine:
                 reasons.append(f"复合配料成分不明确，无法确认{restriction}：" + "、".join(uncertain))
         if constraints.allergies:
             warnings.append("仅核对菜谱文字中的已知过敏原；未验证品牌配方或烹饪交叉接触。")
-        for excluded in constraints.excluded_ingredients:
+        for excluded in food_exclusions:
             matches = self.food_matches(recipe, excluded)
             if matches:
                 reasons.append(f"明确排除「{excluded}」命中配料或步骤：{'、'.join(matches)}。")
@@ -209,10 +316,15 @@ class RuleEngine:
                 reasons.append(
                     f"复合配料来源不明，无法核对排除食材「{excluded}」：{'、'.join(uncertain)}。"
                 )
-        if constraints.no_spicy:
-            matches = [term for term in self.config["spicy_terms"] if contains_term(text, term)]
-            if matches:
-                reasons.append("不辣要求命中辣味配料：" + "、".join(matches))
+        if constraints.no_spicy or explicit_non_spicy_flavor_preference(constraints.preferences):
+            reasons.extend(non_spicy_reasons(
+                text, recipe.labels,
+                ingredient_terms=self.config["spicy_terms"],
+                spicy_labels=self.config.get("spicy_labels", ["辣", "微辣", "香辣", "酸辣"]),
+                uncertain_terms=self.config["uncertain_composites"],
+                unparsed="unparsed_ingredients" in recipe.quality_flags,
+            ))
+            warnings.append("不辣检查基于菜谱配料、步骤和显式口味标签；未验证品牌配方或个人辣味感受。")
         if constraints.max_minutes is not None:
             reasons.append(f"菜谱缺少可核验的总烹饪时间，无法保证 {constraints.max_minutes} 分钟内完成。")
         if constraints.inventory is not None:
@@ -228,34 +340,48 @@ class RuleEngine:
 
         score = 0.0
         for item in constraints.preferred_ingredients:
-            if self.food_matches(recipe, item):
+            if self.preference_matches(recipe, item):
                 score += 3.0
-                reasons.append(f"配料包含偏好食材「{item}」。")
-        for goal in constraints.health_goals:
+                if is_menu_group_preference(item):
+                    reasons.append(f"源菜位及原料支持偏好「{item}」；不表示份量已核算。")
+                else:
+                    reasons.append(f"配料包含偏好食材「{item}」。")
+        for goal in dict.fromkeys(constraints.health_goals):
             rule = self.config["health_goals"].get(goal)
             if rule is None:
                 warnings.append(f"健康目标「{goal}」暂未配置定性排序规则。")
                 continue
-            matched_categories = set(recipe.categories) & set(rule.get("prefer_categories", []))
-            preferred = [term for term in rule.get("prefer_terms", []) if contains_term(text, term)]
-            discouraged = [term for term in rule.get("discourage_terms", []) if contains_term(text, term)]
-            methods = set(recipe.methods)
-            good_methods = methods & set(rule.get("prefer_methods", []))
-            bad_methods = methods & set(rule.get("discourage_methods", []))
-            score += 2 * bool(matched_categories) + 2 * bool(preferred) + bool(good_methods)
-            score -= 3 * bool(discouraged) + 2 * bool(bad_methods)
-            if matched_categories or preferred or good_methods:
-                category_names = {"vegetable": "蔬菜类别", "protein": "蛋白质来源类别", "staple": "主食类别"}
-                evidence = preferred or sorted(good_methods) or [
-                    category_names.get(category, category) for category in sorted(matched_categories)
-                ]
-                reasons.append(f"{goal}偏好排序参考：{'、'.join(evidence)}；仅为食材或做法依据。")
-            if discouraged or bad_methods:
-                evidence = discouraged or sorted(bad_methods)
-                reasons.append(f"{goal}偏好降低该配方排序，依据：{'、'.join(evidence)}。")
+            evidence = self.goal_evidence(recipe, goal)
+            assert evidence is not None
+            score += evidence.score
+            if evidence.has_preference:
+                ranked_categories = evidence.category_foods if evidence.category_rank_enabled else ()
+                preferred = evidence.preferred_foods if evidence.preferred_rank_terms is None else tuple(
+                    food for food in evidence.preferred_foods
+                    if any(contains_term(food, term) for term in evidence.preferred_rank_terms)
+                )
+                ranked_foods = list(dict.fromkeys([*preferred, *ranked_categories]))
+                if evidence.positive_rank_enabled and (ranked_foods or evidence.good_methods):
+                    reasons.append(f"{goal}偏好排序参考：{'、'.join([*ranked_foods, *evidence.good_methods])}；仅为食材或做法依据。")
+                if evidence.category_foods and (
+                    not evidence.category_rank_enabled or not evidence.positive_rank_enabled
+                ):
+                    reasons.append(
+                        f"{goal}食材来源参考：{'、'.join(evidence.category_foods)}；"
+                        "配料来源不作为当前成菜类别的排序加分，未判断摄入量或健康达标。"
+                    )
+            if evidence.has_rank_caution:
+                caution = [*evidence.discouraged_foods, *evidence.bad_methods]
+                caution += [f"{term}（原始配料声明）" for term in evidence.raw_cautions]
+                caution += [f"{term}（步骤声明）" for term in evidence.step_cautions]
+                reasons.append(f"{goal}偏好降低该配方排序，依据：{'、'.join(caution)}；未判断摄入量。")
+            if evidence.has_attention:
+                attention = list(evidence.attention_foods)
+                attention += [f"{term}（原始配料声明）" for term in evidence.raw_attention]
+                attention += [f"{term}（步骤声明）" for term in evidence.step_attention]
+                reasons.append(f"{goal}含钠来源待核：{'、'.join(attention)}；仅提醒，不因出现而扣分。需核品牌、用量、分餐和全天摄入，不判定高钠或低钠。")
             warnings.append(rule["note"])
-        preference_text = " ".join(constraints.preferences)
-        if "清淡" in preference_text and set(recipe.methods) & {"蒸", "煮", "焯"}:
+        if "清淡" in supported_flavor_preferences(constraints.preferences) and self.soft_goal_scores(recipe, constraints)[-1]:
             score += 1
             reasons.append("清淡做法偏好参考蒸、煮或焯；调味用量仍未知。")
         if not reasons:

@@ -1,7 +1,7 @@
 """Local-only replay of every private profile against every supplied dialogue.
 
 The supplied dialogues contain no profile binding. Each matrix cell therefore
-has its own conversation, while the fixed human Intent annotations exercise
+has its own conversation, while fixed manually specified Intent fixtures exercise
 the real agent, retrieval, rules, planner and SQLite state without an API key.
 Only allowlisted diagnostics are written to disk.
 """
@@ -56,6 +56,7 @@ _FAILURE_CODES = {
     "known_allergen_in_source",
     "unknown_composite_with_allergy",
     "spicy_ingredient_with_no_spicy_constraint",
+    "unverified_no_spicy_composite",
 }
 _TOP_FIELDS = {
     "report_schema_version",
@@ -162,10 +163,15 @@ def _sha256(path: Path) -> str:
 
 def _git_commit() -> str:
     """Identify the tested checkout without exposing source paths."""
+    project_root = Path(__file__).resolve().parents[1]
+    if not (project_root / ".git").exists():
+        # A ZIP snapshot nested under another checkout must not inherit that
+        # parent's HEAD as its own tested version. Its archive hash is separate.
+        return "unknown"
     try:
         return subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parents[1],
+            cwd=project_root,
             check=True,
             capture_output=True,
             text=True,
@@ -348,6 +354,7 @@ async def _run_cell(
                     source_text,
                     state.constraints.allergies,
                     state.constraints.no_spicy,
+                    labels=re.split(r"[、,，;；\n]+", row["label"]),
                 )
                 failures.update(oracle["failures"])
                 if oracle["unknown_allergy_values"]:
@@ -514,7 +521,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- 有菜单的响应：{summary.get('menu_observations', 0)}；"
         f"菜谱来源核验：{summary.get('source_checks', 0)}",
         f"- 本地耗时：{summary.get('local_elapsed_seconds', 0)} 秒"
-        "（人工意图 fixture，不代表真实模型延迟）",
+        "（静态意图 fixture，人工复核来源未验证，不代表真实模型延迟）",
         "",
         "## 状态与失败代码",
         "",
@@ -545,6 +552,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
             "未保存健康详情、对话原文或完整响应。过敏词表无法验证品牌配方、"
             "交叉接触；没有可靠份量时不能计算个人定量营养。",
             "逐条失败代码见 `failures.jsonl`。",
+            "轮次完整覆盖不是需求已满足；澄清／无菜单响应不能计排菜质量通过。"
+            "遗留 limitation 代码名中的 human 不代表本批存在真实人工标签。",
             "",
         ]
     )

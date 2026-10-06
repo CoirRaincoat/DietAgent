@@ -133,7 +133,9 @@ async def test_actual_planner_and_suggestion_channels_screen_fixed_old_record(
         item.name = "合成白菜豆腐饭" + item.recipe_id
         item.raw_ingredients = "白菜；大米；豆腐"
         item.ingredients = [Ingredient(raw=value, name=value) for value in ["白菜", "大米", "豆腐"]]
-        item.categories = ["staple", "protein", "vegetable"]
+        # Keep the original source row and its current primary-role metadata;
+        # alias safety is not permission to restore old mixed-ingredient roles.
+        item.categories = list(old_j20_recipe.categories)
     assert set(old_j20_recipe.categories) == set(safe[0].categories)
     profile = UserProfile(
         data_scope="synthetic", user_id=900001, age=30, sex="女",

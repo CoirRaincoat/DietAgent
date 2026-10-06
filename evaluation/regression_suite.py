@@ -24,7 +24,11 @@ import httpx
 from app.domain.models import Recipe
 from app.infrastructure.data import RECIPE_PATH
 from app.infrastructure.synthetic import load_synthetic_catalog
+from evaluation.main_meal_oracle import ORACLE_VERSION as MAIN_MEAL_ORACLE_VERSION
+from evaluation.main_meal_oracle import main_meal_findings
 from evaluation.menu_quality import menu_quality_snapshot, summarize_menu_quality
+from evaluation.no_spicy_oracle import ORACLE_VERSION as NO_SPICY_ORACLE_VERSION
+from evaluation.no_spicy_oracle import no_spicy_findings
 from evaluation.reporting import write_bundle
 from evaluation.stream_performance import (
     StreamObservation,
@@ -33,8 +37,8 @@ from evaluation.stream_performance import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v2.json"
-VALIDATOR_VERSION = "synthetic-validator-v4"
+DEFAULT_SUITE_PATH = Path(__file__).with_name("cases") / "regression_v3.json"
+VALIDATOR_VERSION = "synthetic-validator-v19"
 SYNTHETIC_USER_IDS = {900001, 900002, 900003}
 RUBRICS = ("basic", "complex", "interaction")
 PERFORMANCE_METRICS = ("ttft", "single_e2e", "multi_average")
@@ -108,6 +112,9 @@ def load_suite(path: Path = DEFAULT_SUITE_PATH) -> SuiteDefinition:
                 for rule in turn.expect.get("independent_food_rules", []):
                     if not rule.get("label") or not rule.get("forbidden_terms"):
                         raise ValueError(f"Case {case_id} has an empty food oracle rule")
+                for requirement in turn.expect.get("independent_food_requirements", []):
+                    if not requirement.get("label") or not requirement.get("required_terms"):
+                        raise ValueError(f"Case {case_id} has an empty food requirement rule")
         cases.append(
             CaseDefinition(
                 case_id=case_id,
@@ -143,6 +150,24 @@ def _menu_quality_for_turn(
     """Observe quality only after independent source and food checks pass."""
     by_name = {check["check"]: check["passed"] for check in checks}
     required = {"catalog_traceability", "independent_food_constraints"}
+    if "main_meal_eligibility" in by_name:
+        required.add("main_meal_eligibility")
+    if "independent_food_requirements" in by_name:
+        required.add("independent_food_requirements")
+    if "independent_dish_composition" in by_name:
+        required.add("independent_dish_composition")
+    if "independent_whole_meal_diet" in by_name:
+        required.add("independent_whole_meal_diet")
+    if "independent_meal_context" in by_name:
+        required.add("independent_meal_context")
+    if "independent_health_reporting" in by_name:
+        required.add("independent_health_reporting")
+    if "independent_primary_roles" in by_name:
+        required.add("independent_primary_roles")
+    if "independent_culinary_focus" in by_name:
+        required.add("independent_culinary_focus")
+    if "independent_cooking_methods" in by_name:
+        required.add("independent_cooking_methods")
     if not required.issubset(by_name):
         return {"status": "unavailable", "reason": "validation_not_observed"}
     if any(
@@ -276,6 +301,15 @@ def _independent_recipe_checks(
     """
     trace_failures = []
     food_failures = []
+    role_failures = []
+    requirement_evidence: list[dict[str, Any]] = []
+    no_spicy_expected = (
+        expected.get("constraints", {}).get("no_spicy") is True
+        or any(diner.get("no_spicy") is True and diner.get("attendance", True)
+               for diner in expected.get("expected_diners", []))
+        or any(rule.get("label") == "不吃辣（预期事实）"
+               for rule in expected.get("independent_food_rules", []))
+    )
     items = [("menu", item) for item in result.get("menu", [])]
     items += [("replacement_suggestions", item)
               for item in result.get("replacement_suggestions", [])]
@@ -286,8 +320,17 @@ def _independent_recipe_checks(
         if recipe is None:
             trace_failures.append(evidence | {"reason": "recipe_missing_from_local_catalog"})
             food_failures.append(evidence | {"reason": "cannot_audit_unknown_recipe"})
+            role_failures.append(evidence | {"reason": "cannot_audit_unknown_recipe"})
             continue
         provenance = item.get("provenance") or {}
+        matched_roles = main_meal_findings(
+            recipe.name, recipe.raw_ingredients, re.split(r"[、,，;；\n]+", recipe.raw_label),
+            steps=recipe.steps,
+        )
+        if matched_roles:
+            role_failures.append(evidence | {
+                "rule": MAIN_MEAL_ORACLE_VERSION, "matched": matched_roles,
+            })
         if (item.get("name") != recipe.name
                 or provenance.get("recipe_id") != recipe.recipe_id
                 or provenance.get("source_row") != recipe.source_row
@@ -298,6 +341,18 @@ def _independent_recipe_checks(
         visible_text = json.dumps({key: item.get(key) for key in (
             "ingredients", "ingredient_details", "steps", "cooking_steps"
         )}, ensure_ascii=False)
+        if no_spicy_expected:
+            source_labels = re.split(r"[、,，;；\n]+", recipe.raw_label)
+            visible_labels = (item.get("card") or {}).get("badges", [])
+            for origin, raw_text, labels in (
+                ("catalog", source_text, source_labels),
+                ("response", visible_text, visible_labels),
+            ):
+                matched = no_spicy_findings(raw_text, labels)
+                if matched:
+                    food_failures.append(evidence | {
+                        "origin": origin, "rule": NO_SPICY_ORACLE_VERSION, "matched": matched,
+                    })
         for rule in expected.get("independent_food_rules", []):
             for origin, raw_text in (("catalog", source_text), ("response", visible_text)):
                 text = re.sub(r"\s+", "", raw_text).casefold()
@@ -308,14 +363,42 @@ def _independent_recipe_checks(
                     food_failures.append(evidence | {
                         "origin": origin, "rule": rule["label"], "matched": matched,
                     })
-    return [
+        if location == "menu":
+            source_text = re.sub(r"\s+", "", source_text).casefold()
+            for requirement in expected.get("independent_food_requirements", []):
+                matched = [
+                    term for term in requirement["required_terms"] if term.casefold() in source_text
+                ]
+                if matched:
+                    requirement_evidence.append({
+                        **evidence,
+                        "rule": requirement["label"],
+                        "matched": matched,
+                    })
+    missing_requirements = [
+        requirement["label"]
+        for requirement in expected.get("independent_food_requirements", [])
+        if not any(evidence["rule"] == requirement["label"] for evidence in requirement_evidence)
+    ]
+    checks = [
         _check("catalog_traceability", "menu and suggestions match local recipe source",
                trace_failures, bool(result.get("menu")) and recipes is not None
                and not trace_failures),
         _check("independent_food_constraints", "authored food rules pass for menu and suggestions",
                food_failures, bool(result.get("menu")) and recipes is not None
                and not food_failures),
+        _check("main_meal_eligibility", "no known drink, dessert or preparation in ordinary meal slots",
+               role_failures, bool(result.get("menu")) and recipes is not None
+               and not role_failures),
     ]
+    if "independent_food_requirements" in expected:
+        checks.append(_check(
+            "independent_food_requirements",
+            "every authored requirement appears in at least one source menu recipe",
+            {"missing": missing_requirements, "evidence": requirement_evidence},
+            bool(result.get("menu")) and recipes is not None and not missing_requirements,
+        ))
+    return checks
 
 
 def evaluate_turn(
@@ -364,6 +447,52 @@ def evaluate_turn(
         outcomes.extend(_diner_checks(result, expected["expected_diners"]))
     if expected.get("catalog_traceability") or "independent_food_rules" in expected:
         outcomes.extend(_independent_recipe_checks(result, expected, recipes))
+    if "dish_composition" in expected:
+        from evaluation.composition_oracle import composition_findings
+        findings = composition_findings(result.get("menu", []), expected["dish_composition"],
+                                        result.get("replacement_suggestions", []))
+        outcomes.append(_check("independent_dish_composition", "authored source quotas for menu and proposals",
+                               findings, bool(menu_ids) and not findings))
+    if "whole_meal_diet" in expected:
+        from evaluation.diet_oracle import diet_findings
+        findings = diet_findings(result.get("menu", []), expected["whole_meal_diet"],
+                                 result.get("replacement_suggestions", []))
+        outcomes.append(_check("independent_whole_meal_diet", "authored whole-recipe diet review",
+                               findings, not findings))
+    if "meal_context" in expected:
+        from evaluation.context_oracle import context_findings
+        findings = context_findings(result.get("menu", []), expected["meal_context"],
+                                    result.get("replacement_suggestions", []))
+        outcomes.append(_check("independent_meal_context", "authored source context, not clinical fit",
+                               findings, not findings))
+    if "health_reporting" in expected:
+        from evaluation.health_oracle import health_reporting_findings
+        findings = health_reporting_findings(result, expected["health_reporting"])
+        outcomes.append(_check("independent_health_reporting", "authored source cautions, not clinical efficacy",
+                               findings, not findings))
+    if "primary_roles" in expected:
+        from evaluation.role_oracle import primary_role_findings
+        observed_roles = ({key: recipe.categories for key, recipe in recipes.items()}
+                          if recipes is not None else None)
+        findings = primary_role_findings(result, expected["primary_roles"], observed_roles)
+        outcomes.append(_check("independent_primary_roles", "authored source primary-role review",
+                               findings, not findings))
+    if "culinary_focus" in expected:
+        from app.domain.culinary_focus import culinary_food_focus
+        from evaluation.focus_oracle import culinary_focus_findings
+        observed_focus = ({key: sorted(culinary_food_focus(r).families) for key, r in recipes.items()}
+                          if recipes is not None else None)
+        findings = culinary_focus_findings(result, expected["culinary_focus"], observed_focus)
+        outcomes.append(_check("independent_culinary_focus", "authored source culinary-focus review",
+                               findings, not findings))
+    if "cooking_methods" in expected:
+        from app.domain.cooking_methods import main_cooking_methods
+        from evaluation.method_oracle import cooking_method_findings
+        observed_methods = ({key: list(main_cooking_methods(r)) for key, r in recipes.items()}
+                            if recipes is not None else None)
+        findings = cooking_method_findings(result, expected["cooking_methods"], observed_methods)
+        outcomes.append(_check("independent_cooking_methods", "authored source finishing-method review",
+                               findings, not findings))
     if "clarification_fields" in expected:
         actual = sorted(
             question.get("field") for question in result.get("clarification_questions", [])

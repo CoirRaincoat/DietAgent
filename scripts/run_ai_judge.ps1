@@ -19,7 +19,7 @@ $envFile = Join-Path $repoRoot "configs\compose.env"
 
 function Import-JudgeEnvironment {
     param([string]$Path)
-    $allowed = @("JUDGE_API_KEY", "JUDGE_BASE_URL", "JUDGE_MODEL", "JUDGE_TIMEOUT_SECONDS")
+    $allowed = @("JUDGE_API_KEY", "JUDGE_BASE_URL", "JUDGE_MODEL", "JUDGE_TIMEOUT_SECONDS", "JUDGE_MAX_TOKENS")
     foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
         $trimmed = $line.Trim()
         if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
@@ -89,6 +89,9 @@ try {
     )
     if ($env:JUDGE_TIMEOUT_SECONDS) {
         $judgeEnvironmentArgs += @("-e", "JUDGE_TIMEOUT_SECONDS")
+    }
+    if ($env:JUDGE_MAX_TOKENS) {
+        $judgeEnvironmentArgs += @("-e", "JUDGE_MAX_TOKENS")
     }
     $runArgs = @("run", "--rm") + $judgeEnvironmentArgs + @(
         "-v", "${repoRoot}:/work:ro",

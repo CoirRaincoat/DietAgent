@@ -11,7 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from app.domain.cooking_methods import METHOD_VERSION, source_cooking_method_evidence
+from app.domain.dish_roles import ROLE_VERSION, has_protein_ingredient, primary_dish_role
+from app.domain.meal_roles import preparation_only_steps
 from app.domain.models import Ingredient, Recipe, UserProfile
+from app.domain.source_preparation import grain_completion_issue
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RECIPE_PATH = Path("dataset/recipe_kb/recipes_sample_2000.csv")
@@ -121,59 +125,16 @@ def parse_labels(raw: str) -> tuple[list[str], list[str]]:
     return labels, flags
 
 
-# Culinary protein-source metadata must have ingredient evidence. Names such as
-# 鱼香茄子 and animal-named mushrooms do not prove the presence of fish or meat.
-_PROTEIN_INGREDIENT_TOKENS = (
-    "肉", "排骨", "鸡", "鸭", "鹅", "鱼", "虾", "蟹", "牛腩", "牛腱", "里脊",
-    "蹄", "蛤", "蛏", "鲍", "生蚝", "牡蛎", "扇贝", "豆腐", "豆干", "腐竹",
-    "百叶", "蛋", "牛排", "羊排", "羊腿", "小排", "牛仔骨", "肘", "鸽",
-    "花甲", "豆皮", "香干", "豆花", "腊肠", "火腿", "培根", "猪", "凤爪",
-    "龙骨", "青口贝", "银鲳", "东星斑", "骨头",
-)
-_PROTEIN_FALSE_FRIENDS = (
-    "鸡精", "鸡粉", "鸡汁", "鸡汤", "鸡高汤", "鸡味", "鸡肉粉", "鸡油",
-    "牛肉粉", "牛肉汁", "牛肉汤", "牛骨汤", "猪骨汤", "骨汤", "高汤",
-    "鲍汁", "鲍鱼汁", "鱼露", "鱼油", "鱼豉油", "鱼香酱", "蚝油",
-    "海鲜酱", "虾酱", "虾油", "虾粉", "蟹酱", "蟹粉调味", "猪油",
-    "鸭油", "鹅油", "蛋黄酱", "鸡腿菇", "鸡枞", "鸡头米", "鱼腥草",
-    "蟹味菇", "鸭梨",
-)
-
-
 def _has_protein_source(ingredients: list[Ingredient]) -> bool:
-    return any(
-        any(token in item.name for token in _PROTEIN_INGREDIENT_TOKENS)
-        and not any(token in item.name for token in _PROTEIN_FALSE_FRIENDS)
-        for item in ingredients
-    )
+    """Keep ingredient-level nutrition evidence independent of culinary roles."""
+    return any(has_protein_ingredient(item.name) for item in ingredients)
 
 
 def classify_recipe(name: str, ingredients: list[Ingredient], steps: str, labels: list[str]) -> tuple[list[str], list[str], list[str]]:
-    """Heuristic culinary categories, not evidence of nutrient concentrations."""
-    primary = name + " " + " ".join(item.name for item in ingredients[:3])
-    categories: list[str] = []
-    if (
-        any(token in name for token in ("打发", "面团", "发酵", "揉面", "测试菜"))
-        or name in {
-            "冰糖粉", "乳化", "高温快煮", "68℃慢煮", "59℃慢煮", "派皮",
-            "万能凉拌汁", "果蔬清洗", "蔬菜碎", "照烧汁", "蒜泥",
-        }
-        or name.endswith(("果酱", "辣椒酱", "番茄酱", "秋梨膏", "草莓酱", "蓝莓酱", "拌饭酱"))
-    ):
-        categories.append("component")
-    if any(token in name for token in ("蛋糕", "饼干", "布丁", "冰淇淋", "冰激凌", "泡芙", "马卡龙", "巧克力", "蛋挞", "糖水", "桃胶", "雪媚娘", "麻薯", "双皮奶", "糯米糍", "大福", "慕斯", "糍粑", "冰棍", "班戟", "拉糕", "糯米糕", "月饼", "司康", "钵仔糕", "甜甜圈", "达克瓦兹")) or name.endswith(("派", "酥", "奶冻", "糖", "冻", "甜点")) or {"甜品", "甜点"} & set(labels):
-        categories.append("dessert")
-    if name.endswith(("茶", "奶昔", "豆浆", "咖啡", "果汁", "饮", "饮品", "牛奶", "鲜奶", "拿铁", "星冰乐", "五谷浆")) or "果饮" in name:
-        categories.append("drink")
-    if "汤" in name or "羹" in name or name == "腌笃鲜":
-        categories.append("soup")
-    if any(token in name for token in ("米饭", "炒饭", "盖饭", "焖饭", "烩饭", "面条", "意面", "蝴蝶面", "拉面", "炒面", "拌面", "乌冬", "馒头", "包子", "饺", "馄饨", "粥", "披萨", "比萨", "面包", "饭团", "米粉", "粉丝", "粉条", "年糕", "春卷", "菜卷", "煎饼", "烧饼", "杂粮", "红薯", "紫薯", "玉米", "土豆", "马铃薯", "吐司", "花卷", "法棍", "烧麦", "馍", "发糕")) or name.endswith(("饭", "面", "饼", "包", "粽", "芋艿")):
-        categories.append("staple")
-    if _has_protein_source(ingredients):
-        categories.append("protein")
-    if any(token in primary for token in ("白菜", "生菜", "青菜", "菠菜", "油麦", "西兰花", "花菜", "菜花", "芥蓝", "卷心菜", "包菜", "芹菜", "空心菜", "苋菜", "荠菜", "茄", "瓜", "萝卜", "芦笋", "竹笋", "冬笋", "蘑菇", "香菇", "木耳", "秋葵", "莴笋", "菜心", "韭菜", "莲藕", "豆芽", "西葫芦", "金针菇", "口蘑", "塔菜", "娃娃菜", "山药", "淮山", "藕", "海带", "苕尖", "春笋", "豇豆", "刀豆", "毛豆", "青椒", "尖椒")):
-        categories.append("vegetable")
-    methods = [method for method in ("蒸", "煮", "炖", "炒", "烤", "煎", "炸", "焖", "拌", "榨汁") if method in name + steps]
+    """Exclusive primary culinary role; ingredient nutrients remain separate."""
+    role = primary_dish_role(name, (item.name for item in ingredients), steps, labels)
+    categories = [role] if role else []
+    methods = list(source_cooking_method_evidence(steps).main_methods)
     meal_types = [meal for meal in ("早餐", "午餐", "晚餐", "下午茶", "夜宵") if meal in labels]
     # Missing metadata stays missing: the retriever can treat [] as unknown.
     return categories, methods, meal_types
@@ -200,13 +161,17 @@ def normalize_recipes(rows: Iterable[Mapping[str, str]]) -> dict[str, Recipe]:
         categories, methods, meal_types = classify_recipe(name, ingredients, steps, labels)
         if not steps.strip():
             flags.append("missing_steps")
+        elif preparation_only_steps(steps):
+            flags.append("preparation_only_steps")
+        if grain_completion_issue(name, (i.name for i in ingredients), steps):
+            flags.append("unverified_grain_completion")
         if not name:
             flags.append("missing_name")
         if "component" in categories:
             flags.append("processing_component")
         if occurrences[fingerprint] > 1:
             flags.append("duplicate_source_record")
-        blocked = {"missing_steps", "missing_name", "missing_ingredients", "unparsed_ingredients", "processing_component"}
+        blocked = {"missing_steps", "missing_name", "missing_ingredients", "unparsed_ingredients", "processing_component", "preparation_only_steps", "unverified_grain_completion"}
         recipes[recipe_id] = Recipe(
             recipe_id=recipe_id, name=name, raw_ingredients=source["食材清单"],
             steps=steps, raw_label=source["label"], ingredients=ingredients,
@@ -238,7 +203,7 @@ def normalize_profile(raw: dict[str, Any]) -> UserProfile:
     preferences = [str(raw.get("口味偏好", ""))]
     return UserProfile(
         user_id=int(raw["id"]), age=int(raw["年龄"]), sex=raw["性别"],
-        height_cm=raw["身高_cm"], weight_kg=raw["体重_kg"], bmi=raw["BMI"],
+        height_cm=raw.get("身高_cm"), weight_kg=raw.get("体重_kg"), bmi=raw.get("BMI"),
         activity=raw.get("劳动强度", ""), special_groups=raw.get("特殊人群", []),
         pregnancy_weeks=int(pregnancy[1]) if pregnancy else None,
         preferences=_unique(PREFERENCE_ALIASES.get(x, x) for x in preferences),
@@ -267,6 +232,8 @@ def load_catalog(project_root: Path | None = None) -> DataCatalog:
     names = Counter(recipe.name for recipe in recipes.values())
     report = {
         "schema_version": 1,
+        "culinary_role_version": ROLE_VERSION,
+        "cooking_method_version": METHOD_VERSION,
         "recipe_count": len(recipes), "profile_count": len(profiles),
         "dialogue_count": len(dialogues),
         "dialogue_turn_count": sum(len(x["user_messages"]) for x in dialogues),
@@ -280,7 +247,7 @@ def load_catalog(project_root: Path | None = None) -> DataCatalog:
         "limitations": [
             "食材名保留原文，别名与过敏映射由规则层统一管理。",
             "未知用量、份数、耗时和营养数值不估算；原始健康标签不是已验证结论。",
-            "烹饪类别与方式是启发式检索元数据；缺失餐次保留为空。",
+            "烹饪类别为互斥的成菜主要角色启发式，不代表份量比例、纯素或营养浓度；缺失餐次保留为空。",
             "对话样例没有绑定用户档案，不可将对话 ID 当作用户 ID。",
         ],
     }

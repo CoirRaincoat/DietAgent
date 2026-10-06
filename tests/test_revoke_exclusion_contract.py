@@ -144,7 +144,11 @@ async def test_parse_sends_pending_revoke_context(profile, state):
 
     assert intent.revoke_confirmed is True
     context = json.loads(json.loads(observed[0].content)["messages"][1]["content"])
-    assert context["pending_revoke_exclusion"] == {"subject": None, "targets": ["鸡蛋"]}
+    assert context["pending_revoke_exclusion"] is True
+    # Targets may be private profile facts. Confirmation needs only the bit;
+    # exact target matching and removal remain local and tested below.
+    assert "鸡蛋" not in context["message"]
+    assert "targets" not in context and "profile" not in context
 
 
 # --- Offline full-flow: fake LLM turns drive the deterministic state machine. ---
