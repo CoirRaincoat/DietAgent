@@ -17,6 +17,7 @@ from app.agent.clarification import (
 from app.agent.context_answers import grounded_context_answer
 from app.agent.context_retry_scope import preserve_context_retry_scope, resolve_replacement_target
 from app.agent.count_conflicts import apply_menu_counts
+from app.agent.dessert_requests import explicit_dessert_count
 from app.agent.diet_mode import DIET_QUESTION, ground_diet_intent
 from app.agent.diners import (
     DinerConflict,
@@ -94,7 +95,7 @@ from app.domain.matching_tags import (
 )
 from app.domain.meal_context import negative_meal_request_clauses
 from app.domain.meal_history import HISTORY_LIMIT, explicit_new_meal
-from app.domain.meal_roles import is_main_meal_recipe
+from app.domain.meal_roles import dessert_structure_satisfied, is_menu_recipe
 from app.domain.method_preferences import method_request_clauses
 from app.domain.models import (
     ChatResult,
@@ -578,6 +579,14 @@ class MealAgent:
         elif dietary.meal_mode is not None:
             state.pending_diet_mode = False
         counts, structure_issue = explicit_menu_structure(message)
+        dessert_count, dessert_issue = explicit_dessert_count(
+            message, total_explicit="dish_count" in counts,
+        )
+        if dessert_issue:
+            state.pending_dessert_allocation = True
+            structure_issue = dessert_issue
+        elif dessert_count is not None:
+            state.pending_dessert_allocation = False
         soup_composition, soup_problem = explicit_soup_composition(message)
         if soup_problem:
             state.pending_soup_composition = True
@@ -624,6 +633,9 @@ class MealAgent:
         state.meal_constraints = meal_constraints
         constraints = meal_constraints
         count_issue = apply_menu_counts(state, intent)
+        if dessert_count is not None:
+            constraints.dessert_count = dessert_count
+            state.menu_structure_explicit = True
         restore_issue = apply_constraint_restore(state, intent)
         revoke_issue = apply_revoke_exclusion(state, intent, message)
         if intent.action in {"plan", "replace", "reject"}:
@@ -809,6 +821,11 @@ class MealAgent:
             return issue
         if structure_issue:
             return structure_issue
+        if state.pending_dessert_allocation:
+            return "饭后甜点的数量口径仍待确认，请明确总共几道（含汤和甜点）、其中几道甜点，或明确取消甜点。"
+        if (state.constraints.dessert_count
+                and state.constraints.dessert_count + state.constraints.soup_count >= state.constraints.dish_count):
+            return "总菜数包含汤和甜点，至少保留一道正餐；请确认菜数、汤数及甜点数。"
         if state.pending_diet_mode:
             return DIET_QUESTION
         pending_diets = [diner.display_name for diner in state.diners if diner.attendance and diner.pending_diet_mode]
@@ -990,6 +1007,8 @@ class MealAgent:
         people = f"{constraints.people} 人" if "people" in confirmed else "人数待确认"
         meal = constraints.meal_type if "meal_type" in confirmed else "餐次待确认"
         items = [f"{people}，{meal}，共 {constraints.dish_count} 道（含汤）"]
+        if constraints.dessert_count:
+            items[0] = f"{people}，{meal}，共 {constraints.dish_count} 道（含汤和 {constraints.dessert_count} 道饭后甜点）"
         if constraints.allergies:
             items.append("已列过敏食材：" + "、".join(constraints.allergies))
         if constraints.excluded_ingredients:
@@ -1085,7 +1104,7 @@ class MealAgent:
         verified_generated = verified_generated_recipe(recipe)
         if (
             not decision.allowed
-            or not is_main_meal_recipe(recipe)
+            or not is_menu_recipe(recipe, constraints)
             or (recipe.recipe_id not in self.catalog.recipes and not verified_generated)
         ):
             raise RuntimeError("Final recipe validation failed")
@@ -1188,7 +1207,8 @@ class MealAgent:
                 or sum("soup" in recipe.categories for recipe in current) != constraints.soup_count
                 or len(verified_current) != len(current)
                 or any(recipe.recipe_id in rejected_ids for recipe in current)
-                or any(not is_main_meal_recipe(recipe) for recipe in current)
+                or any(not is_menu_recipe(recipe, constraints) for recipe in current)
+                or not dessert_structure_satisfied(current, constraints)
                 or not composition_satisfied(current, constraints)
                 or missing_scoped_methods(current, constraints.scoped_methods, required_only=True)
             ):
@@ -1358,7 +1378,9 @@ class MealAgent:
                         break
                 if planning.failure and generation_warnings:
                     planning.failure += " " + " ".join(generation_warnings)
-            if not planning.failure and recheck:
+            # The existing method/meal alternatives contain ordinary dishes
+            # only; they must not discard explicit dessert allocations.
+            if not planning.failure and recheck and not constraints.dessert_count:
                 trade_candidates = safe
                 if replace_slot is not None:
                     target = current[replace_slot - 1]
@@ -1381,6 +1403,7 @@ class MealAgent:
             len(chosen) != constraints.dish_count
             or len({recipe.recipe_id for recipe in chosen}) != len(chosen)
             or sum("soup" in recipe.categories for recipe in chosen) != constraints.soup_count
+            or not dessert_structure_satisfied(chosen, constraints)
             or any(recipe.recipe_id in rejected_ids for recipe in chosen)
             or not composition_satisfied(chosen, constraints)
         ):

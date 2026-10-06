@@ -25,14 +25,14 @@ MAIN_MEAL_ROLES = frozenset({"vegetable", "protein", "staple", "soup"})
 
 
 def is_non_meal_role_exclusion(value: str) -> bool:
-    """Two exact category words, not ingredient names or allergy exemptions.
+    """Exact category words, not ingredient names or allergy exemptions.
 
     Keep the user's original exclusion in stored constraints. The ordinary
     meal planner already excludes drinks/desserts using source-aware roles;
     receiving these words in an ingredient-shaped field must not reject all
     meal dishes as unsupported foods. Unknown or compound names stay foods.
     """
-    return value.strip() in {"甜品", "饮料"}
+    return value.strip() in {"甜品", "甜点", "饮料"}
 
 
 _PREPARATION_NAMES = frozenset(
@@ -325,3 +325,35 @@ def is_main_meal_recipe(recipe: Recipe) -> bool:
             recipe.name, (i.name for i in recipe.ingredients), recipe.steps, recipe.labels
         )
     )
+
+
+def is_dessert_recipe(recipe: Recipe) -> bool:
+    """A finished source dessert, not a drink or a main-role metadata shortcut."""
+    roles = set(non_meal_roles(
+        recipe.name, (i.name for i in recipe.ingredients), recipe.steps, recipe.labels,
+    ))
+    return (
+        recipe.eligible and set(recipe.categories) == {"dessert"}
+        and roles == {"dessert"} and not preparation_only_steps(recipe.steps)
+        and bool(recipe.ingredients) and bool(recipe.steps.strip())
+        # This first bounded allocation is for plated desserts, not a second
+        # uncounted sweet soup. Liquid dessert/soup overlap needs explicit
+        # quantity clarification; do not hide it behind dessert metadata.
+        and not recipe.name.strip().endswith(("汤", "羹", "糊"))
+        and finished_soup_evidence(recipe.name, (i.name for i in recipe.ingredients), recipe.steps) is None
+        and not (
+            "同烹" in recipe.name and re.search(r"[&＋+]", recipe.name)
+            and len(re.findall(r"放入第[0-9一二两三四五六七八九十]+层", recipe.steps)) >= 2
+        )
+    )
+
+
+def is_menu_recipe(recipe: Recipe, constraints) -> bool:
+    """Only an explicitly allocated dessert slot extends ordinary meal roles."""
+    return is_main_meal_recipe(recipe) or (
+        constraints.dessert_count > 0 and is_dessert_recipe(recipe)
+    )
+
+
+def dessert_structure_satisfied(menu, constraints) -> bool:
+    return sum(is_dessert_recipe(r) for r in menu) == constraints.dessert_count

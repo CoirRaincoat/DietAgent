@@ -273,7 +273,7 @@ def dish_kind(recipe: Recipe, constraints: Constraints | None = None) -> DishKin
     """
     if "soup" in recipe.categories:
         return "soup"
-    if "staple" in recipe.categories:
+    if {"staple", "dessert", "drink", "component"}.intersection(recipe.categories):
         return "other"
     kind = non_meat_source_kind(recipe)
     if kind == "meat" and constraints is not None and constraints.meat_dish_scope == "independent_entree":
@@ -385,6 +385,6 @@ def composition_issue(constraints: Constraints) -> str | None:
     requested_soups = (constraints.meat_soup_count or 0) + (constraints.vegetarian_soup_count or 0)
     if requested_soups > constraints.soup_count:
         return "荤汤与素汤数量超过总汤数，请确认总汤数及各来源数量；汤不计入非汤荤素菜数。"
-    if requested > constraints.dish_count - constraints.soup_count:
+    if requested > constraints.dish_count - constraints.soup_count - constraints.dessert_count:
         return "荤菜与素菜数量超过非汤菜位，请确认总菜数、汤数和荤素数量；汤与主食不计入荤素菜数。"
     return None

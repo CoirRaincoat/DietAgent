@@ -9,7 +9,7 @@ exactly the rejection delta that rejected that menu.
 """
 
 from app.domain.dish_composition import composition_satisfied
-from app.domain.meal_roles import is_main_meal_recipe
+from app.domain.meal_roles import dessert_structure_satisfied, is_menu_recipe
 from app.domain.models import (
     Intent,
     MenuRevision,
@@ -114,7 +114,8 @@ def apply_menu_restore(
                 "无法直接恢复；请调整要求后重试。"
             )
     if (
-        any(not is_main_meal_recipe(recipe) for recipe in chosen)
+        any(not is_menu_recipe(recipe, state.constraints) for recipe in chosen)
+        or not dessert_structure_satisfied(chosen, state.constraints)
         or not composition_satisfied(chosen, state.constraints)
         or missing_scoped_methods(chosen, state.constraints.scoped_methods, required_only=True)
     ):

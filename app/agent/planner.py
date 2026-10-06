@@ -43,7 +43,7 @@ from app.domain.matching_tags import (
 )
 from app.domain.meal_context import meal_context_warnings, meal_cost
 from app.domain.meal_history import recommendation_counts
-from app.domain.meal_roles import is_main_meal_recipe
+from app.domain.meal_roles import is_dessert_recipe, is_main_meal_recipe
 from app.domain.method_preferences import (
     method_preference_warnings,
     method_reference_mask,
@@ -82,6 +82,97 @@ class MenuPlanner:
     @staticmethod
     def _is_main_meal(recipe: Recipe) -> bool:
         return is_main_meal_recipe(recipe)
+
+    def _plan_with_desserts(self, candidates, constraints, current, replace_slot,
+                            reject_ids, query_terms, **options) -> PlanResult:
+        """Reserve explicit last dessert slots; reuse the unchanged main planner.
+
+        Dessert never participates in main-role repair or exact entrée quotas.
+        A local edit may not shift another slot, even to satisfy new allocation.
+        """
+        count = constraints.dessert_count
+        main_count = constraints.dish_count - count
+        if main_count < 1 or constraints.soup_count > main_count:
+            return PlanResult(failure="总菜数包含汤和甜点，至少保留一道正餐；请确认菜数、汤数及甜点数。")
+        if issue := composition_issue(constraints):
+            return PlanResult(failure=issue)
+        if replace_slot is not None and not 1 <= replace_slot <= len(current):
+            return PlanResult(failure="指定的换菜序号不存在，需要明确当前菜单中的目标菜品。")
+        rejected = set(reject_ids or ())
+        rejected_names = {compact(r.name) for r in current if r.recipe_id in rejected}
+        if replace_slot is not None:
+            rejected.add(current[replace_slot - 1].recipe_id)
+            rejected_names.add(compact(current[replace_slot - 1].name))
+        pool = []
+        seen = set()
+        decisions = {}
+        for recipe in [*current, *candidates]:
+            if (not is_dessert_recipe(recipe) or recipe.recipe_id in rejected
+                    or compact(recipe.name) in rejected_names or compact(recipe.name) in seen):
+                continue
+            decision = self.rules.evaluate(recipe, constraints)
+            if not decision.allowed:
+                continue
+            pool.append(recipe)
+            decisions[recipe.recipe_id] = decision
+            seen.add(compact(recipe.name))
+        desserts = [None] * count
+        for index, old in enumerate(current[main_count:constraints.dish_count]):
+            if old in pool and old not in desserts:
+                desserts[index] = old
+        for index in range(count):
+            if desserts[index] is not None:
+                continue
+            choices = [r for r in pool if r not in desserts]
+            if not choices:
+                return PlanResult(failure="未找到足够符合已知限制的源配方甜点；不放宽过敏、不辣、素食、库存或数量要求。")
+            desserts[index] = max(choices, key=lambda r: (
+                sum(bool(self.rules.preference_matches(r, t)) for t in constraints.preferred_ingredients),
+                recipe_relevance_score(r, query_terms or [], constraints, self.rules), decisions[r.recipe_id].score,
+            ))
+        main_constraints = constraints.model_copy(deep=True, update={
+            "dish_count": main_count, "dessert_count": 0,
+            "preferred_ingredients": [t for t in constraints.preferred_ingredients
+                                      if not any(self.rules.preference_matches(r, t) for r in desserts)],
+            "scoped_methods": [r for r in constraints.scoped_methods
+                               if r.slot is None or r.slot <= main_count],
+        })
+        main_current = current[:main_count]
+        main_options = dict(options)
+        if replace_slot is not None and replace_slot > main_count:
+            # Editing a dessert is not permission to optimize the main dishes.
+            main_options["recheck_soft_preferences"] = False
+        planned = self.plan(
+            [r for r in candidates if is_main_meal_recipe(r)], main_constraints,
+            current=main_current,
+            replace_slot=replace_slot if replace_slot is not None and replace_slot <= main_count else None,
+            reject_ids=rejected,
+            query_terms=[t for t in (query_terms or [])
+                         if not any(self.rules.preference_matches(r, t) for r in desserts)],
+            **main_options,
+        )
+        if planned.failure:
+            return planned
+        combined = [*planned.recipes, *desserts]
+        if replace_slot is not None and (len(combined) != len(current) or any(
+            old != new for i, (old, new) in enumerate(zip(current, combined))
+            if i != replace_slot - 1
+        )):
+            return PlanResult(failure="甜点分配或当前限制需要改变其他菜位；请确认是否允许整餐调整，未擅自修改。")
+        if not composition_satisfied(combined, constraints) or missing_scoped_methods(
+            combined, constraints.scoped_methods, required_only=True,
+        ):
+            return PlanResult(failure="甜点不能替代明确的荤素数量或指定做法要求，请确认本餐结构。")
+        _, _, gaps = self._cover_ingredient_preferences(
+            combined, {}, {}, constraints, combined, None, {}, allow_repair=False,
+        )
+        warnings = [w for w in planned.warnings if not w.startswith("当前菜单未覆盖食材偏好：")]
+        warnings.extend(gaps)
+        return PlanResult(recipes=combined, warnings=warnings, changes=[
+            {"slot": i + 1, "old_recipe_id": current[i].recipe_id if i < len(current) else None,
+             "new_recipe_id": r.recipe_id, "reason": "按明确的正餐和饭后甜点菜位安排"}
+            for i, r in enumerate(combined) if i >= len(current) or current[i] != r
+        ])
 
     def _cover_ingredient_preferences(
         self, recipes: list[Recipe], allowed: dict[str, Recipe],
@@ -195,6 +286,15 @@ class MenuPlanner:
         allow_adjacent_rotation: bool = False,
     ) -> PlanResult:
         current = current or []
+        if constraints.dessert_count:
+            return self._plan_with_desserts(
+                candidates, constraints, current, replace_slot, reject_ids, query_terms,
+                recheck_soft_preferences=recheck_soft_preferences,
+                experiment_menu_variety=experiment_menu_variety,
+                experiment_initial_goal_frontier=experiment_initial_goal_frontier,
+                recent_recipe_names=recent_recipe_names,
+                allow_adjacent_rotation=allow_adjacent_rotation,
+            )
         if issue := context_conflict_issue(constraints):
             return PlanResult(failure=issue)
         if conflict := flavor_conflicts(constraints.preferences):

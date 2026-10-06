@@ -147,6 +147,12 @@ def response_facts(
         "constraints": _constraint_copy(constraints),
         "balance": balance_summary(balance),
     }
+    if constraints.dessert_count:
+        facts["dessert_allocation"] = (
+            f"本餐共 {constraints.dish_count} 道，包含 {constraints.soup_count} 道汤和 "
+            f"{constraints.dessert_count} 道饭后甜点；甜点单列，不计作蛋白主菜、蔬菜菜或主食。"
+            "原配方保留，不凭甜品类别断言高糖或健康；未计算份量、糖或营养含量。"
+        )
     diner_text = _diner_copy(diners)
     if safety_notice := ingredient_safety_copy(list(chosen)):
         facts["ingredient_safety"] = safety_notice
@@ -400,6 +406,8 @@ def required_fact_ids(intent: Intent, facts: dict[str, str]) -> list[str]:
         required.append("health_goals")
     if "food_preferences" in facts:
         required.append("food_preferences")
+    if "dessert_allocation" in facts:
+        required.append("dessert_allocation")
     if "flavor_preferences" in facts:
         required.append("flavor_preferences")
     if "flavor_retraction" in facts:

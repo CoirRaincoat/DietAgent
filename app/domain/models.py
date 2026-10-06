@@ -146,6 +146,9 @@ class Constraints(DomainModel):
     meal_type: str = "晚餐"
     dish_count: int = Field(default=3, ge=1, le=8)
     soup_count: int = Field(default=0, ge=0, le=3)
+    # Literal meal-local allocation, never inferred from a profile/model label.
+    # Dessert slots are included in dish_count, not extra dishes or entrées.
+    dessert_count: int = Field(default=0, ge=0, le=3)
     meat_dish_count: int | None = Field(default=None, ge=0, le=8)
     vegetarian_dish_count: int | None = Field(default=None, ge=0, le=8)
     # Grounded meal-local quantity meaning, not an LLM- or profile-selected diet.
@@ -374,6 +377,7 @@ class SessionState(DomainModel):
     pending_diet_mode: bool = False
     pending_dish_composition: bool = False
     pending_soup_composition: bool = False
+    pending_dessert_allocation: bool = False
     pending_method_tradeoff: MethodMealTradeoff | None = None
     method_meal_priority_binding: str | None = None
     pending_flavor_resolution: FlavorResolution | None = None

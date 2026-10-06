@@ -18,7 +18,7 @@ from app.domain.matching_tags import (
     supported_flavor_preferences,
 )
 from app.domain.meal_context import infant_only_source
-from app.domain.meal_roles import is_main_meal_recipe, is_non_meal_role_exclusion
+from app.domain.meal_roles import is_dessert_recipe, is_main_meal_recipe, is_non_meal_role_exclusion
 from app.domain.menu_group_preferences import is_menu_group_preference, menu_group_matches
 from app.domain.models import Constraints, Recipe
 from app.domain.source_preparation import grain_completion_issue
@@ -238,7 +238,10 @@ class RuleEngine:
             value for value in constraints.excluded_ingredients
             if is_non_meal_role_exclusion(value)
         ]
-        if role_exclusions and not is_main_meal_recipe(recipe):
+        if role_exclusions and not is_main_meal_recipe(recipe) and (
+            not is_dessert_recipe(recipe)
+            or any(value.strip() in {"甜品", "甜点"} for value in role_exclusions)
+        ):
             reasons.append(
                 "菜品类别排除「" + "、".join(role_exclusions)
                 + "」需可核验正餐角色；该记录为非正餐或正餐角色未确认。"

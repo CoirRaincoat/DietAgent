@@ -51,7 +51,7 @@ def minimum_role_counts(
     """
     if total_count < 0:
         raise ValueError("total_count must not be negative")
-    slots = max(0, total_count - constraints.soup_count) if constraints else total_count
+    slots = max(0, total_count - constraints.soup_count - constraints.dessert_count) if constraints else total_count
     shared_main_meal = (
         constraints is not None
         and constraints.people >= 3
