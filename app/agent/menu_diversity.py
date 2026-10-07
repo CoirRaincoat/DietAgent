@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from difflib import SequenceMatcher
 
+from app.domain.cooking_methods import main_cooking_methods
 from app.domain.models import Recipe
 from app.rules.engine import compact
 
@@ -29,8 +30,8 @@ def _pair_similarity(candidate: Recipe, selected: Recipe) -> Similarity:
     candidate_primary = compact(candidate.ingredients[0].name) if candidate.ingredients else ""
     selected_primary = compact(selected.ingredients[0].name) if selected.ingredients else ""
     same_primary = int(bool(candidate_primary and candidate_primary == selected_primary))
-    candidate_methods = set(candidate.methods)
-    selected_methods = set(selected.methods)
+    candidate_methods = set(main_cooking_methods(candidate))
+    selected_methods = set(main_cooking_methods(selected))
     method_overlap = (
         len(candidate_methods & selected_methods) / len(candidate_methods | selected_methods)
         if candidate_methods and selected_methods

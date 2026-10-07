@@ -1,11 +1,21 @@
-version: "mvp-1"
+version: "source-health-preference-v1"
 scope: "基于菜谱文字的过敏与明确禁忌筛查；健康目标仅为定性排序，不计算营养摄入或治疗效果。"
 sources:
+  lkk_seasoned_soy_sauce_reference:
+    title: "李锦记中国官网：蒸鱼豉油产品配料表"
+    url: "https://china.lkk.com.cn/enterprise/zh-CN/Products/SoySauce/李锦记蒸鱼豉油/"
+    checked_on: "2026-10-04"
+    use: "该品牌例子列大豆及小麦粉，支持蒸鱼豉油按豆／麦潜在风险保守筛查；不证明源菜谱品牌、所有配方或交叉接触，不把它作为普通酱油库存替代。"
   who_healthy_diet:
     title: "WHO Healthy diet"
     url: "https://www.who.int/news-room/fact-sheets/detail/healthy-diet"
-    checked_on: "2026-09-24"
+    checked_on: "2026-10-01"
     use: "多样食物、蛋白质来源、蔬菜及减少游离糖/钠的一般原则；不把人群阈值当个体目标。"
+  nhlbi_dash:
+    title: "NHLBI DASH Eating Plan"
+    url: "https://www.nhlbi.nih.gov/health/dash-eating-plan"
+    checked_on: "2026-10-01"
+    use: "蔬菜、全谷、豆类等食物多样性及关注钠、饱和脂肪和甜食的方向；不根据单道菜声明符合 DASH，不使用人群份数或钠阈值作为个人处方。"
   fda_allergens:
     title: "FDA Food Allergies"
     url: "https://www.fda.gov/food/nutrition-food-labeling-and-critical-foods/food-allergies"
@@ -49,6 +59,8 @@ aliases:
 # A generic meat product is withheld only for a related meat restriction; its
 # unknown contents must never count as a positive preference match.
 food_families:
+  酱油:
+    members: [酱油, 生抽, 老抽, 味极鲜, 蒸鱼豉油]
   猪肉:
     members: [猪肉, 猪五花肉, 五花肉, 猪前腿肉, 猪后腿肉, 猪腿肉, 猪小排, 猪大排, 猪仔排, 猪肋排, 猪肋条肉, 猪排, 排骨, 肋排, 仔排, 猪里脊, 猪瘦肉, 猪廋肉, 猪肥肉, 猪肥膘, 猪梅花肉, 猪展肉, 猪眉子肉, 猪腱子肉, 猪颈肉, 猪蹄, 猪脚, 猪手, 猪肘, 猪肚, 猪肝, 猪心, 猪腰, 猪肾, 猪肺, 猪耳, 猪舌, 猪血, 猪皮, 猪大肠, 猪小肠, 猪骨, 猪棒骨, 猪筒骨, 猪脊骨, 猪脆骨, 猪油]
     ignore_phrases: [牛排骨, 羊排骨, 牛肋排, 羊肋排, 素排骨, 排骨酱]
@@ -86,7 +98,7 @@ allergens:
     terms: [核桃, 杏仁, 腰果, 榛子, 松子, 开心果, 碧根果, 夏威夷果, 巴旦木, 榧子, 坚果, 松仁, 胡桃, 南杏, 北杏]
   soy:
     inputs: [大豆, 黄豆, 豆类, 豆制品, 豆, soybean, soy, soya]
-    terms: [大豆, 黄豆, 毛豆, 豆腐, 豆干, 豆皮, 豆浆, 豆乳, 腐竹, 百叶, 千张, 豆芽, 豆酱, 豆瓣酱, 豆豉, 酱油, 生抽, 老抽, 味极鲜, 豆油, 豆花, 素鸡, 素鸭, 香干, 腐乳, 豆奶, 豆渣, 豆蛋白]
+    terms: [大豆, 黄豆, 毛豆, 豆腐, 豆干, 豆皮, 豆浆, 豆乳, 腐竹, 百叶, 千张, 豆芽, 豆酱, 豆瓣酱, 豆豉, 酱油, 生抽, 老抽, 味极鲜, 蒸鱼豉油, 豆油, 豆花, 素鸡, 素鸭, 香干, 腐乳, 豆奶, 豆渣, 豆蛋白]
   dairy:
     inputs: [奶, 牛奶, 乳, 乳制品, 奶制品, milk, dairy, 乳蛋白]
     terms: [牛奶, 牛乳, 鲜奶, 奶粉, 酸奶, 酸乳, 奶酪, 乳酪, 芝士, 黄油, 奶油, 炼乳, 炼奶, 乳清, 酪蛋白, 乳粉]
@@ -97,7 +109,7 @@ allergens:
     ignore_phrases: [蛋白质, 蛋白酶, 植物蛋白]
   wheat:
     inputs: [小麦, 麦, 面粉, 麸质, gluten, wheat]
-    terms: [小麦, 面粉, 面条, 面包, 馒头, 面筋, 饺子皮, 馄饨皮, 酱油, 生抽, 老抽, 麦芽, 挂面, 手擀面, 意大利面, 意面, 乌冬, 通心粉, 饼干, 蛋糕, 馄饨, 水饺, 饺子, 包子, 面糊, 低筋, 高筋, 中筋, 吐司, 土司, 法棍, 全麦粉, 意粉, 面包糠, 面包屑]
+    terms: [小麦, 面粉, 面条, 面包, 馒头, 面筋, 饺子皮, 馄饨皮, 酱油, 生抽, 老抽, 蒸鱼豉油, 麦芽, 挂面, 手擀面, 意大利面, 意面, 乌冬, 通心粉, 饼干, 蛋糕, 馄饨, 水饺, 饺子, 包子, 面糊, 低筋, 高筋, 中筋, 吐司, 土司, 法棍, 全麦粉, 意粉, 面包糠, 面包屑]
   sesame:
     inputs: [芝麻, sesame]
     terms: [芝麻, 香油, 麻油, 麻酱]
@@ -117,13 +129,18 @@ allergen_groups:
   豆: [soy, "specific:豌豆", "specific:蚕豆", "specific:绿豆", "specific:红豆", "specific:鹰嘴豆"]
   蛋奶: [egg, dairy]
 
-specific_allergens: [啤酒, 芒果, 菠萝, 凤梨, 草莓, 桃, 水蜜桃, 猕猴桃, 奇异果, 香蕉, 苹果, 柑橘, 橙, 柠檬, 芹菜, 香菇, 蘑菇, 木耳, 香菜, 番茄, 土豆, 牛肉, 羊肉, 猪肉, 鸡肉, 玉米, 大米, 燕麦, 荞麦, 豌豆, 蚕豆, 绿豆, 红豆, 鹰嘴豆]
+specific_allergens: [啤酒, 芒果, 菠萝, 凤梨, 草莓, 桃, 水蜜桃, 猕猴桃, 奇异果, 香蕉, 苹果, 柑橘, 橙, 柠檬, 芹菜, 香菇, 蘑菇, 木耳, 香菜, 牛肉, 羊肉, 猪肉, 鸡肉, 玉米, 大米, 燕麦, 荞麦, 豌豆, 蚕豆, 绿豆, 红豆, 鹰嘴豆, 酱油, 番茄, 土豆]
 uncertain_composites: [调味料, 调料包, 酱料包, 火锅底料, 咖喱块, 浓汤宝, 复合调味料, 沙拉酱, 沙茶酱, 蛋白粉, 不详, 未知]
-spicy_terms: [辣椒, 辣子, 辣油, 辣酱, 小米椒, 小米辣, 朝天椒, 剁椒, 泡椒, 干红椒, 红油, 豆瓣酱, 哈瓦那椒, 辣粉, 青尖椒, 尖椒, 杭椒, 美人椒, 二荆条, 泡红椒, 线椒]
+# Finite prepared-ingredient evidence: some source cards declare only 辣子鸡,
+# not its constituent chili. Do not infer from recipe titles or any generic 辣.
+spicy_terms: [辣椒, 辣子, 辣椒面, 辣油, 辣酱, 小米椒, 小米辣, 油泼辣子, 辣子油, 糍粑辣子, 朝天椒, 剁椒, 泡椒, 干红椒, 红油, 豆瓣酱, 哈瓦那椒, 辣粉, 青尖椒, 尖椒, 杭椒, 美人椒, 二荆条, 泡红椒, 线椒, 辣子鸡, 芥末]
+spicy_labels: [辣, 微辣, 香辣, 酸辣]
 known_foods: [白菜, 青菜, 菠菜, 生菜, 油麦菜, 娃娃菜, 包菜, 苦瓜, 丝瓜, 冬瓜, 南瓜, 黄瓜, 茄子, 胡萝卜, 白萝卜, 萝卜, 西葫芦, 芦笋, 莲藕, 山药, 芋头, 秋葵, 菜心, 西芹, 芹菜, 韭菜, 韭黄, 洋葱, 香菜, 香菇, 蘑菇, 金针菇, 杏鲍菇, 木耳, 银耳, 海带, 紫菜, 玉米, 豌豆, 蚕豆, 绿豆, 红豆, 黑豆, 红薯, 糯米, 小米, 燕麦, 糙米, 藜麦, 意面, 面条, 面粉, 淀粉, 玉米淀粉, 土豆淀粉, 红枣, 枸杞, 莲子, 百合, 桂圆, 牛肉, 羊肉, 排骨, 五花肉, 肉馅, 鸡翅, 鸡腿, 鸡, 鸭, 鸭肉, 火腿, 培根, 腊肉, 香肠, 鱼, 鲈鱼, 鲫鱼, 草鱼, 鳕鱼, 三文鱼, 黄鱼, 带鱼, 蟹, 蚝油, 料酒, 米酒, 啤酒, 白酒, 黄酒, 醋, 米醋, 陈醋, 香醋, 米醋, 胡椒, 胡椒粉, 黑胡椒, 白胡椒, 花椒, 八角, 桂皮, 孜然, 香叶, 罗勒, 迷迭香, 薄荷, 冰糖, 红糖, 蜂蜜, 糖浆, 橄榄油, 菜籽油, 玉米油, 葵花籽油, 食用油, 植物油, 油, 番茄酱, 甜面酱, 腐乳, 鸡精, 味精, 高汤, 清汤, 肉汤, 鸡汤, 牛肉汤, 蘑菇汤]
 
 # Numeric weights are engineering preferences, not evidence-based clinical doses.
 # Labels such as 降糖/降压/抗癌 in raw data never constitute evidence.
+# Experimental category-role scoping is OFF: source trials lost method coverage
+# and promoted incomplete prepared products. Do not implicitly enable in service.
 health_goals:
   控糖:
     sources: [who_healthy_diet]
@@ -134,9 +151,10 @@ health_goals:
   增肌:
     sources: [who_healthy_diet]
     prefer_categories: [protein]
+    positive_roles: [protein]
     prefer_terms: [鸡蛋, 鸡肉, 鸡胸肉, 豆腐, 牛奶, 鱼]
     discourage_terms: []
-    note: "增肌偏好优先提供蛋白质来源；未计算蛋白质克数或增肌效果。"
+    note: "增肌定性排序在蛋白质成菜位内复核，不因配菜或主食含少量蛋等配料而重排这些菜位；未计算蛋白质克数或增肌效果。"
   减脂:
     sources: [who_healthy_diet]
     prefer_categories: [vegetable]
@@ -150,7 +168,18 @@ health_goals:
     discourage_terms: [猪肝, 鸡肝, 鸭肝, 鹅肝, 牛肝, 肝脏, 猪腰, 猪肾, 牛肾, 猪心, 猪肚, 沙丁鱼, 凤尾鱼, 虾, 蟹, 啤酒, 白酒, 黄酒, 糖浆]
     note: "降尿酸偏好降低部分内脏、海鲜和酒类配方的排序；没有嘌呤数值，不保证降低尿酸。"
   降压:
-    sources: [who_healthy_diet]
+    sources: [who_healthy_diet, nhlbi_dash]
     prefer_categories: [vegetable]
-    discourage_terms: [酱油, 生抽, 老抽, 蚝油, 豆瓣酱, 豆豉, 咸菜, 腌菜, 腊肉, 火腿, 培根, 香肠]
-    note: "降压偏好关注含盐调味品来源；用量未知，不能判定低钠或治疗效果。"
+    scope_category_to_role: true
+    attention_terms: [盐, 酱油, 生抽, 老抽, 蚝油, 鱼露, 豉油, 黄豆酱, 味噌, 味增, 味曾, 鸡汁, 鸡粉, 高汤块, 大酱, 豆瓣酱, 豆豉, 腐乳, 鸡精, 味精, 浓汤宝]
+    discourage_terms: [咸菜, 腌菜, 腊肉, 火腿, 培根, 香肠, 咸肉, 咸蛋]
+    note: "降压仅为食物模式参考；盐和含钠调味品只作来源提醒，不因出现而扣分。品牌、用量、分餐与全天摄入不足时不能判定低钠，也不能判定高钠或治疗效果；未列盐不等于无钠。"
+  护心:
+    sources: [who_healthy_diet, nhlbi_dash]
+    prefer_categories: [vegetable]
+    prefer_terms: [糙米, 燕麦, 全麦, 豆腐, 黄豆, 鹰嘴豆]
+    scope_category_to_role: true
+    scope_preferred_to_role: true
+    attention_terms: [盐, 酱油, 生抽, 老抽, 蚝油, 鱼露, 豉油, 黄豆酱, 味噌, 味增, 味曾, 鸡汁, 鸡粉, 高汤块, 大酱, 豆瓣酱, 豆豉, 腐乳, 鸡精, 味精, 浓汤宝]
+    discourage_terms: [咸菜, 腌菜, 腊肉, 火腿, 培根, 香肠, 咸肉, 咸蛋, 猪油, 黄油, 奶油, 椰子油, 棕榈油, 五花肉, 猪肥肉, 白糖, 白砂糖, 砂糖, 冰糖, 红糖, 蜂蜜, 糖浆, 炼乳, 炼奶, 果酱, 蓝莓酱, 草莓酱, 菠萝酱, 果汁, 橙汁, 豆沙馅, 红豆沙, 蜜豆]
+    note: "护心仅为食物模式参考，盐和含钠调味品只提醒来源、不因出现而扣分；其他配料参考也不证明摄入超标。未核算品牌、钠、脂肪、能量、分餐和全天摄入，不能判定低钠，也不能判定高钠、低脂或治疗效果，不代替医疗建议。"

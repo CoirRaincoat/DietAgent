@@ -31,8 +31,8 @@ def _recipe(
 @pytest.fixture
 def catalog() -> dict[str, Recipe]:
     return {
-        "1": _recipe("1", categories=["vegetable"], methods=["炒"], ingredients=["鸡蛋", "盐"]),
-        "2": _recipe("2", categories=["protein"], methods=["蒸"], ingredients=["鸡蛋", "葱"]),
+        "1": _recipe("1", categories=["vegetable"], methods=["炒"], ingredients=["鸡蛋", "盐"], steps="炒熟装盘。"),
+        "2": _recipe("2", categories=["protein"], methods=["蒸"], ingredients=["鸡蛋", "葱"], steps="蒸熟装盘。"),
         "3": _recipe("3", categories=["staple"], methods=["煮"], ingredients=["米饭"]),
     }
 
@@ -46,6 +46,9 @@ def test_menu_quality_uses_source_recipes_and_pairwise_exact_ingredients(catalog
         "category_counts": {"vegetable": 1, "protein": 1, "staple": 1, "soup": 0},
         "role_coverage": 3,
         "method_count": 3,
+        "method_evidence_version": "source-finishing-method-v5",
+        "method_known_dishes": 3,
+        "method_unknown_dishes": 0,
         "temperature_counts": {"hot": 3, "cold": 0, "unknown": 0},
         "possible_pairs": 3,
         "comparable_pairs": 3,

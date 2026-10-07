@@ -4,6 +4,8 @@ import re
 from uuid import NAMESPACE_URL, uuid5
 
 from app.agent.clarification import asserted_context, conditional_context
+from app.agent.diet_mode import DIET_LABELS, MODE_ORDER, explicit_diet_mode
+from app.domain.matching_tags import explicit_non_spicy_flavor_preference
 from app.domain.models import (
     Constraints,
     Diner,
@@ -52,7 +54,9 @@ def find_diner(diners: list[Diner], update: DinerUpdate) -> Diner | None:
 
 
 def profile_diner(profile: UserProfile) -> Diner:
-    """Retain profile facts without presuming a separate attendee identity."""
+    """Create the profile owner's participant record without copying raw health data."""
+    modes = [explicit_diet_mode(value) for value in profile.preferences]
+    explicit_modes = [mode for mode, _ in modes if mode is not None]
     return Diner(
         diner_id=f"profile-{profile.user_id}",
         display_name="用户",
@@ -62,6 +66,9 @@ def profile_diner(profile: UserProfile) -> Diner:
         allergies=list(profile.allergies),
         preferences=list(profile.preferences),
         health_goals=list(profile.health_goals),
+        no_spicy=explicit_non_spicy_flavor_preference(profile.preferences),
+        diet_mode=max(explicit_modes, key=lambda mode: MODE_ORDER[mode]) if explicit_modes else "omnivore",
+        pending_diet_mode=any(uncertain for _, uncertain in modes) or len(set(explicit_modes)) > 1,
     )
 
 
@@ -154,6 +161,9 @@ def apply_diner_updates(
             )
         if update.no_spicy is True:
             diner.no_spicy = True
+        if update.diet_mode is not None:
+            diner.diet_mode = update.diet_mode
+            diner.pending_diet_mode = False
         diner.aliases = _merge(diner.aliases, [diner.display_name, update.diner, *update.aliases])
         diner.allergies = _merge(diner.allergies, update.allergies)
         diner.excluded_ingredients = _merge(diner.excluded_ingredients, update.excluded_ingredients)
@@ -198,6 +208,8 @@ def aggregate_constraints(meal: Constraints, diners: list[Diner]) -> Constraints
         aggregate.preferences = _merge(aggregate.preferences, diner.preferences)
         aggregate.health_goals = _merge(aggregate.health_goals, diner.health_goals)
         aggregate.no_spicy = aggregate.no_spicy or diner.no_spicy
+        if MODE_ORDER[diner.diet_mode] > MODE_ORDER[aggregate.diet_mode]:
+            aggregate.diet_mode = diner.diet_mode
     return aggregate
 
 
@@ -210,6 +222,7 @@ def diner_constraints(diner: Diner) -> Constraints:
         preferences=list(diner.preferences),
         health_goals=list(diner.health_goals),
         no_spicy=diner.no_spicy,
+        diet_mode=diner.diet_mode,
     )
 
 
@@ -221,6 +234,8 @@ def _known_constraints(diner: Diner) -> list[str]:
         known.append("不吃：" + "、".join(diner.excluded_ingredients))
     if diner.no_spicy:
         known.append("不吃辣")
+    if diner.diet_mode != "omnivore":
+        known.append("整餐饮食模式：" + DIET_LABELS[diner.diet_mode])
     if diner.preferences:
         known.append("口味偏好：" + "、".join(diner.preferences))
     if diner.health_goals:
@@ -249,7 +264,7 @@ def diner_suitability(
         unmet = [
             f"未覆盖偏好食材：{ingredient}"
             for ingredient in diner.preferred_ingredients
-            if not any(rules.food_matches(recipe, ingredient) for recipe in recipes)
+            if not any(rules.preference_matches(recipe, ingredient) for recipe in recipes)
         ]
         result.append(
             DinerSuitability(

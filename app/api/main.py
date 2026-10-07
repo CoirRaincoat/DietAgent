@@ -25,9 +25,9 @@ from app.domain.models import ChatResult
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.llm.deepseek import DeepSeekLLM
+from app.infrastructure.runtime_catalog import load_runtime_catalog
 from app.infrastructure.sessions import SessionConflict, SessionStore
 from app.infrastructure.settings import Settings
-from app.infrastructure.synthetic import load_synthetic_catalog
 from app.retrieval.core import RecipeRetriever, RetrievalUnavailable
 
 logger = logging.getLogger(__name__)
@@ -71,14 +71,22 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        data = catalog if catalog is not None else load_synthetic_catalog()
+        data = catalog if catalog is not None else load_runtime_catalog(config.local_profile_path)
         provider = llm or DeepSeekLLM(
             api_key=config.deepseek_api_key.get_secret_value(),
             model=config.deepseek_model, base_url=config.deepseek_base_url,
             timeout_seconds=config.llm_timeout_seconds,
         )
         application.state.agent = MealAgent(
-            data, store or SessionStore(config.database_path), provider, retriever=retriever,
+            data,
+            store or SessionStore(config.database_path),
+            provider,
+            # Source-backed M02 replay demonstrated benefit. Reuse the existing
+            # bounded user-owned history only at literal new-meal boundaries;
+            # ordinary continuation/local edits never become a new meal.
+            experiment_cross_meal_rotation=True,
+            allow_recipe_generation=config.allow_recipe_generation,
+            retriever=retriever,
         )
         application.state.capacity = asyncio.Semaphore(8)
         try:

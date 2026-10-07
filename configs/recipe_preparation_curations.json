@@ -1,0 +1,1249 @@
+{
+  "policy_version": "assistant-preparation-curation-v1",
+  "records": [
+    {
+      "recipe_id": "recipe_8c1bf1749133e42ddce52842",
+      "source_name": "日式炼乳面包",
+      "source_fingerprint": "8c1bf1749133e42ddce52842126aa6e0fd7e6b7012748b17fed6675b2dfe292c",
+      "source_content_sha256": "9fa34a9ffadd955eaf02dc750e5f813ba0d224025dfcd996cca1123a207bfbec",
+      "disposition": "supplement_draft",
+      "reason": "原文止于一次发酵，已声明炼乳与黄油尚有未分配部分。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将已发酵面团排气、擀开，使用清单中尚未用掉的炼乳和软化黄油作涂层，分割叠放或卷起后放入适配模具。完成末次醒发，再用烤箱烘烤，取出放凉；清单中的糖粉可在成品上薄撒。不追加炼乳、黄油或糖粉用量。",
+          "ingredient_names": [
+            "高筋面粉",
+            "牛奶",
+            "白糖",
+            "酵母",
+            "盐",
+            "炼乳",
+            "软化黄油",
+            "糖粉"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "清单与原文已用量的余量需核对；不默认所有糖粉都必须使用。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_afd11b1c958f462f21dc63bf",
+      "source_name": "松子柏仁蒸鳜鱼",
+      "source_fingerprint": "afd11b1c958f462f21dc63bfef47fd6dbe229da096b2612edbb8a7c00ce7a6e2",
+      "source_content_sha256": "7982beeb8c858cc136631af41c554ee3aaa4466d38a8e26c17cb34a1b55e288b",
+      "disposition": "source_conflict",
+      "reason": "食材清单只有鳜鱼和松子仁，步骤却使用未声明的柏子仁，且未写最后蒸制。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "食材清单与步骤不一致",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "确认柏子仁是否缺录及其用量。",
+        "提供实际最后蒸制步骤和设备设置；不能从标题推断原料或健康功效。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_336cc49140251f780bd1aa23",
+      "source_name": "高温快煮",
+      "source_fingerprint": "336cc49140251f780bd1aa23ae053535e23cc1417f4a4718f933f7854c79aa61",
+      "source_content_sha256": "190ac353a50c8e505aab62b14e2767d2f3aa46e7a889ae0f54fef4500f81cd2c",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_f36c523fd78fd056380a231d",
+      "source_name": "星空吐司",
+      "source_fingerprint": "f36c523fd78fd056380a231dec433db81a58b0b259b9154393e0f68b70828aca",
+      "source_content_sha256": "8381e89e9d2eaa63e00d1fd0b333228f1d628e25c50065d44d42ba5000ea0457",
+      "disposition": "supplement_draft",
+      "reason": "原文完成蝶豆花水面团一次发酵，未写干果和坚果进入面团及最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把原文已发酵面团排气、松弛，将清单中的无花果干、开心果仁、葡萄干包入面团或折叠混入，擀卷整形后放入适配吐司模具。完成末次醒发，再用烤箱烘烤并放凉。蝶豆花水只按原文已分配部分使用，不自行增加剩余茶水。",
+          "ingredient_names": [
+            "干蝶豆花",
+            "开水",
+            "高筋面粉",
+            "全麦面粉",
+            "盐",
+            "细砂糖",
+            "酵母",
+            "黄油",
+            "无花果干",
+            "开心果仁",
+            "葡萄干"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "干果和坚果具体切分、分配方式可按实际成形复核；不增加新原料。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_ffc179ba41173ab6615398c8",
+      "source_name": "酸奶发酵",
+      "source_fingerprint": "ffc179ba41173ab6615398c80f88db0904776599d70f7ffc35b8568ca8081e3c",
+      "source_content_sha256": "5892d06a35efb1f44b1b29f2d02834875a1021b52e10d6a7a3e1927ce8aa237a",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_40b99a3f9bc9e193a99658e5",
+      "source_name": "面包面团（发酵）",
+      "source_fingerprint": "40b99a3f9bc9e193a99658e52cecdf4fbac5c7b89e03f1af50c6a7a35bbd4b83",
+      "source_content_sha256": "24edf5c3aa1405e2972169b9920fdee7ecf431a63f5e4787e080b2a100234ea5",
+      "disposition": "retain_component",
+      "reason": "原步骤只有占位数字，可依声明配方补基础揉面发酵参考，但该记录仍是面团组件。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把清单中的高筋面粉、奶粉、细砂糖、盐、活性干酵母与水、纯牛奶、鸡蛋液混合揉成面团；分次揉入清单中的软化黄油，揉至均匀、有延展性，再进行一次发酵至面团明显膨胀。该建议只补面团组件，不自动加烘烤或改为完整正餐。",
+          "ingredient_names": [
+            "活性干酵母",
+            "细砂糖",
+            "盐",
+            "水",
+            "纯牛奶",
+            "鸡蛋液",
+            "软化黄油",
+            "高筋面粉",
+            "奶粉"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "发酵面团组件",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "原占位步骤保留；揉面设备档位和发酵终点需实际核对。",
+        "后续成品造型、配方适用和熟化过程不在该组件记录内。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_5b19b5e46eb94385dda0cafb",
+      "source_name": "奶黄小餐包",
+      "source_fingerprint": "5b19b5e46eb94385dda0cafb67652c5f1ffe9a29f81e8d3c22bfc9e2e39af485",
+      "source_content_sha256": "bf2bca1a7277d35de0acb5f17b2d3b0a1fabf8380dae88ee31673ae04e977d77",
+      "disposition": "supplement_draft",
+      "reason": "原文已备奶黄馅、一次发酵面团，缺包馅和最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将已发酵面团排气、分割、松弛后擀成中间较厚的面皮，包入原文已备好的奶黄馅并收紧接口，收口朝下放入适配烤盘。完成末次醒发，用烤箱烘烤后放凉；不额外补刷蛋液。",
+          "ingredient_names": [
+            "全蛋液",
+            "纯牛奶",
+            "奶粉",
+            "奶黄馅",
+            "细砂糖",
+            "软化黄油",
+            "高筋面粉",
+            "盐",
+            "酵母"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_3f4162e1971d080b772a127d",
+      "source_name": "清新小森林饼干",
+      "source_fingerprint": "3f4162e1971d080b772a127d4bb36626b3fb3cf1169110cf01d97697be891c45",
+      "source_content_sha256": "560c92f1a6f75ce0285fabaf50e2eb4a93b82ddddc03303eb1afd5c6025d5eb7",
+      "disposition": "supplement_draft",
+      "reason": "原文只有基础面团，可可粉、抹茶粉未使用，缺分色、成形与烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将原文面团分成适量小份，把清单中的可可粉和抹茶粉分别揉入不同面团，另留原色面团。将面团松弛至可操作后擀开，用现有模具或手工切出饼干形状，排放于适配烤盘，用烤箱烘烤，取出放凉。颜色搭配与造型是助手建议，不声称还原原菜谱外观。",
+          "ingredient_names": [
+            "低筋面粉",
+            "软化黄油",
+            "糖粉",
+            "全蛋液",
+            "可可粉",
+            "抹茶粉"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "分色饼干面团（原文缺成形烘烤）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_33f3027f1dfe960fa32be0f5",
+      "source_name": "爽口凉皮",
+      "source_fingerprint": "33f3027f1dfe960fa32be0f532cdf4f5e3358a7b025ed6e98785094c9f49d5fe",
+      "source_content_sha256": "a58b798b73333e0176f58a3fd3ed3b46b6c85ebd81577784feec25450912f3e3",
+      "disposition": "supplement_draft",
+      "reason": "原文止于洗面、沉淀面浆，缺面皮熟化、切条和拌配步骤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将原文沉淀好的面浆搅匀，薄铺于适配的不粘蒸盘，蒸制至形成面皮，冷却后揭下切条。加入清单中的黄瓜丝、生抽、醋、蒜水、盐和油泼辣椒拌匀。这里保留原配方的油泼辣椒，不把补全版标为不辣；不另加刷盘油。",
+          "ingredient_names": [
+            "中筋面粉",
+            "水",
+            "黄瓜丝",
+            "生抽",
+            "醋",
+            "蒜水",
+            "盐",
+            "油泼辣椒"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面浆凉皮制品（原文缺蒸制拌配）",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "含油泼辣椒",
+          "dimension": "ingredient_structure"
+        }
+      ],
+      "remaining_questions": [
+        "面浆稠度与原水量分配需要试做，不能新增无记录的水量。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_666dc2596ca2872fad6354ce",
+      "source_name": "乳化",
+      "source_fingerprint": "666dc2596ca2872fad6354ce4f2546d1866d1fdab625496363655f73d7799196",
+      "source_content_sha256": "b064955d1eb1909a33f6f1340fd40677207ff190f283d9519dc08cfefdb1ca44",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_a1e5c84dbf139ca310eea596",
+      "source_name": "黄芪汽锅鸡",
+      "source_fingerprint": "a1e5c84dbf139ca310eea5966b0091c6f21ae0d825b7d9e22f41da23fb789908",
+      "source_content_sha256": "4d053219aa2d40c44648841ccae46b0f98d3f11952bb6a6ce2c2bc5481cb5dfd",
+      "disposition": "source_conflict",
+      "reason": "原文出现未声明的姜、葱，且止于食材准备，缺最后汽锅烹饪流程。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "食材清单与步骤不一致",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "确认姜、葱是否遗漏及用量。",
+        "完整烹饪流程及草本原料使用条件需另核查，不补临床功效或人群安全结论。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_2be6debaf934cb36e55da54e",
+      "source_name": "红豆面包",
+      "source_fingerprint": "2be6debaf934cb36e55da54e1f4a1dd5c6da8a6e8ec47da8e3afa61dd2488ab6",
+      "source_content_sha256": "2606926e02414a5a4cf6df68dca4f6d27f72e65ea1db76cb1cd884c222f21ea2",
+      "disposition": "supplement_draft",
+      "reason": "原文只有面团一次发酵，缺已声明豆馅的装配与最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将已发酵面团排气、分割和松弛，把清单中的蜜豆、豆沙馅包入面团或折叠夹入，收口整形后放入适配烤盘，完成末次醒发。清单中若仍有未使用的全蛋液可作表面薄刷，不追加蛋液。用烤箱烘烤成形后放凉。",
+          "ingredient_names": [
+            "高筋面粉",
+            "耐高糖酵母",
+            "盐",
+            "全蛋液",
+            "细砂糖",
+            "水",
+            "黄油",
+            "蜜豆",
+            "豆沙馅"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "蜜豆与豆沙馅的分配和清单剩余全蛋液需要核对。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_1609dd88230278780c66ae7c",
+      "source_name": "海苔肉松饼",
+      "source_fingerprint": "1609dd88230278780c66ae7c636d792e7e0d5e07dd4c592200c6f516b695a4ff",
+      "source_content_sha256": "7ae935b2061c2d72725822ee23ea9850ad8d85007f34807399ed5e2949a74671",
+      "disposition": "supplement_draft",
+      "reason": "原文已成形并刷蛋黄、撒芝麻，只缺最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将原文已成形、刷好蛋黄液并撒好芝麻的饼放入适配烤盘，用烤箱烘烤至饼皮成形，再取出放凉。不重复加馅、刷蛋或另增用油。",
+          "ingredient_names": [
+            "中筋面粉",
+            "细砂糖",
+            "全蛋液",
+            "猪油",
+            "水",
+            "低筋面粉",
+            "海苔肉松",
+            "玉米油",
+            "白芝麻",
+            "蛋黄液"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "肉松酥饼生坯（原文缺最后烘烤）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "海苔肉松完整商业配料未知，不能宣称过敏安全或精确营养。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_cba692d60bca4be75a8988fa",
+      "source_name": "叉烧焗餐包",
+      "source_fingerprint": "cba692d60bca4be75a8988face1474d085fcd9c6d1a0accde8c598ff2d298392",
+      "source_content_sha256": "3fb582bfdce09bc93f200fe0e6c5004187097645c90fbe51c897d3f80c9946d0",
+      "disposition": "supplement_draft",
+      "reason": "原文备有叉烧馅和揉好面团，缺面团发酵、包馅及成品烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将原文已揉好的面团进行一次发酵，排气、分割和松弛，包入已备好的叉烧馅并收口。放入适配烤盘完成末次醒发。清单中的全蛋液原用途未明确，可建议取未使用部分薄刷表面，再用烤箱烘烤成形后放凉。先核对清单两笔蜂蜜与馅料已用量，未核对前不分配表面蜂蜜或追加用量；刷面蛋液也是助手建议，不是原配方的预留说明。",
+          "ingredient_names": [
+            "大蒜",
+            "姜片",
+            "五花肉",
+            "生抽",
+            "老抽",
+            "料酒",
+            "蚝油",
+            "叉烧酱",
+            "蜂蜜",
+            "淀粉",
+            "酵母",
+            "高筋面粉",
+            "细砂糖",
+            "盐",
+            "纯牛奶",
+            "软化黄油",
+            "全蛋液"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "两组蜂蜜及全蛋液的分配需核对。",
+        "原文馅料设定不作为肉馅熟化安全证明；商业叉烧酱和蚝油完整配料仍未知。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_0a478bd890ab284a1a567d38",
+      "source_name": "奶油打发",
+      "source_fingerprint": "0a478bd890ab284a1a567d38644ec810bd978d46bd7c324722a144c22875bec8",
+      "source_content_sha256": "aa7d371eb0682ac7d8466a387819a283cd9b61e73554fe6b4a995c94609845eb",
+      "disposition": "retain_component",
+      "reason": "原文步骤为空，声明原料可以补打发参考，但仍是甜点组件。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将清单中的动物性淡奶油保持冷藏状态，放入洁净且适配的搅打容器，加入清单中的细砂糖并搅打至体积膨松、形成所需纹路。达到用途需要的状态后停止搅打并保持冷藏；不补未经验证的速度、温度或时间。",
+          "ingredient_names": [
+            "细砂糖",
+            "动物性淡奶油"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "打发奶油组件",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "目标打发程度取决于后续用途；冷藏和设备设置需按实际原料核对。",
+        "该补充不将奶油组件变成完整正餐。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_43b4d4e41d63e589503de036",
+      "source_name": "68℃慢煮",
+      "source_fingerprint": "43b4d4e41d63e589503de036ce3c97880a417fe2f0cebb28da446516d79eff1d",
+      "source_content_sha256": "234b8f8d27ca46759b97a34520e6575811a04e7ab18281ba78c45b1211b75246",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_dfc30109cc7d9661428de8ae",
+      "source_name": "叉烧酥",
+      "source_fingerprint": "dfc30109cc7d9661428de8ae7d43bf731f78c017356fdd674fd4900c87bec993",
+      "source_content_sha256": "6ef8cff5d819355752526d8cc2d8e08122067eb0d8eaf8fcd213f76c5ddadbc9",
+      "disposition": "source_conflict",
+      "reason": "清单声明梅花肉，步骤却使用五花肉，且酥皮后段不完整。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "肉类部位记录冲突",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "先确认实际肉类部位及对应馅料配方，不替换两个部位或臆测脂肪含量。",
+        "核对酥皮整形、包馅、烘烤和表面材料分配。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_43510fb606f3ced4ecceb104",
+      "source_name": "芝士面包圈",
+      "source_fingerprint": "43510fb606f3ced4ecceb10471f51f8b7ce8120fa0dcc165f565daba29dcd615",
+      "source_content_sha256": "32ee489d9f0165c0ce213efda9b18720ee571c9580ef3074bee424c56964a73b",
+      "disposition": "supplement_draft",
+      "reason": "原文只完成揉面与蔓越莓混合，缺发酵、已声明芝士包入、成形和烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把原文已混入蔓越莓干的面团进行一次发酵，排气、分割和松弛后擀开，包入清单中的马苏里拉芝士，收口并整形成圈。放入适配烤盘完成末次醒发，用烤箱烘烤后放凉；不另增刷面蛋液。",
+          "ingredient_names": [
+            "高筋面粉",
+            "奶粉",
+            "耐高糖酵母",
+            "细砂糖",
+            "盐",
+            "牛奶",
+            "全蛋液",
+            "软化黄油",
+            "蔓越莓干",
+            "马苏里拉芝士"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_c0e4ae873049aac3e1780aa6",
+      "source_name": "宫廷枣花酥",
+      "source_fingerprint": "c0e4ae873049aac3e1780aa64b5e6be07e622ec81f76512aee6555cd5b01118e",
+      "source_content_sha256": "a343389eac743d2685ffa06e50fa13ea5d87efe5e20ca26b74ca31a5fce5dc75",
+      "disposition": "source_conflict",
+      "reason": "食材清单中面粉总量与步骤分配量冲突（430g 对 250g+245g），缺包馅与最后热处理。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "面粉用量记录冲突",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "确认面粉总量和水油皮/油酥分配，不擅自选择430g或495g。",
+        "糖、黄油与表面材料的剩余分配也需核对后再补完整造型和烘烤。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_2618d788bf330c652676de50",
+      "source_name": "颠勺",
+      "source_fingerprint": "2618d788bf330c652676de50a9d0838bd2015f0de0b4caa735b81c723ebf6993",
+      "source_content_sha256": "bf67be9d2210fd9b408387587aea74edba368e4f65eccf168548fb9fb8fef6f7",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_10ca3bb483c789cdbd165f5e",
+      "source_name": "钻石可可肉桂饼干",
+      "source_fingerprint": "10ca3bb483c789cdbd165f5ec31d306c95e56e5a26764851c18c6edb0c36d996",
+      "source_content_sha256": "2851092600c1b5cffa7b782ea2772ba63fde4ddeda704cc02e3c7de4b491c17b",
+      "disposition": "source_conflict",
+      "reason": "原文已写180度18分钟和放凉，但未明示烤箱动作；裹边的白砂糖与清单粗砂糖记录不一致。",
+      "additions": [
+        {
+          "placement": "clarification",
+          "text": "原文温度时间句可理解为饼干烘烤，但这只是助手的做法澄清建议。若原作者确认使用烤箱，可在原文已切片面团后执行所列烘烤设置并放凉，不追加一轮烘烤。裹边糖的种类仍需先核对。",
+          "ingredient_names": [
+            "黄油",
+            "糖粉",
+            "淡奶油",
+            "低筋面粉",
+            "可可粉",
+            "肉桂粉",
+            "粗砂糖"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "裹边糖种类待核对",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "确认设备热处理方式，不把助手推测登记为原始成菜动作证据。",
+        "确认裹边应使用粗砂糖还是白砂糖。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_c2d78449517db22763345643",
+      "source_name": "59℃慢煮",
+      "source_fingerprint": "c2d78449517db22763345643a633c45b605d5681b4c17bb63b7208a031071b2e",
+      "source_content_sha256": "2f216fa4e5e57cacd4363ff91522f75aa803862415bde351639a695f8246112c",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_bd11a9a031d3b90b70e28369",
+      "source_name": "日式馒头",
+      "source_fingerprint": "bd11a9a031d3b90b70e28369edb0f2f5f3baf673b7d51c59f4f9551ce8c34d91",
+      "source_content_sha256": "54498cb3bcebc3e395f8a00728e4a55a57dace898f2c21288da1a8c6c7427334",
+      "disposition": "supplement_draft",
+      "reason": "原文已发酵、分割并静置面团，未写最后熟化；烤盘不是实际烘烤证据。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "接原文已静置的分割面团，助手建议作为蒸制馒头版本：把面团放在适配的不粘蒸盘或蒸架上，保持成形间距，使用适配蒸具完成蒸制，取出。蒸制是本次选择的合理补全方案，不是从原文恢复的工艺；不沿用烤盘字样推断已经烘烤。",
+          "ingredient_names": [
+            "高筋面粉",
+            "低筋面粉",
+            "白砂糖",
+            "盐",
+            "奶粉",
+            "速发干酵母",
+            "蜂蜜",
+            "牛奶",
+            "黄油"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "馒头面团（原文缺最后熟化）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "原作者实际最终蒸制或烘烤方式仍未知；试做后再确定采用哪个版本。",
+        "原文已把所列面粉用于揉面，结尾撒粉没有预留量说明，需核对分配，不能追加未记录面粉。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_6cc32eed20d4438f22275580",
+      "source_name": "停刀烧煮",
+      "source_fingerprint": "6cc32eed20d4438f2227558032958a3697aea44df8e5d3175d9283f64eba9187",
+      "source_content_sha256": "009fe9c6ac89084ca06a236551da60ba9b244c3ab96bb41108f6761679d54292",
+      "disposition": "retain_component",
+      "reason": "原记录是自定义原料的设备通用程序，不是具有明确配方的具体菜谱。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "设备通用程序（非具体菜谱）",
+          "dimension": "processing_record"
+        }
+      ],
+      "remaining_questions": [
+        "如需作为具体菜谱推荐，须先提供实际原料、份量及适配的完整流程。",
+        "保留原程序信息，不把程序名称或温度当成熟化安全认证。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_7b08f6d0c02ecdfbf0aa6380",
+      "source_name": "花生酥",
+      "source_fingerprint": "7b08f6d0c02ecdfbf0aa63802cac43bb254c4a0368cd671ebd160931383fe2d9",
+      "source_content_sha256": "0c99d0f9efe53d4e58e9dfe6b2ed96a77b53c8f6a4d02dee79c01fe59670d1e1",
+      "disposition": "supplement_draft",
+      "reason": "原文只混成面团，缺成形、已声明芝麻使用和最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将原文花生面团分割压成饼状，撒上清单中的黑芝麻，放入适配烤盘，用烤箱烘烤成形后取出放凉。不再追加蛋液、糖、油或小苏打。",
+          "ingredient_names": [
+            "花生油",
+            "白糖",
+            "盐",
+            "鸡蛋液",
+            "低筋面粉",
+            "小苏打",
+            "花生碎",
+            "黑芝麻"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "含花生的饼干面团（原文缺成形烘烤）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "原清单小苏打单位和用量需核对；不因步骤补全而认证其配方比例。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_272a3b3602d938300b2fb1df",
+      "source_name": "党参蒸乌鸡",
+      "source_fingerprint": "272a3b3602d938300b2fb1df1a69a93d60be18ecb4ffad94861c604198a57af9",
+      "source_content_sha256": "6d1cd162ff92e440279563e1211d4de885e3313e188995224096b0a6ead75573",
+      "disposition": "needs_confirmation",
+      "reason": "原文止于原料处理和焯水，缺最后蒸制；含草本原料，需要确认完整原配方和使用条件。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "原文缺最后成菜流程",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "核对草本原料与禽肉的原始配方和最后蒸制流程。",
+        "未补功效、人群适用或熟化安全结论；其他普通菜谱补全可继续。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_7fba31346a188bc282163bd6",
+      "source_name": "超软全麦面包",
+      "source_fingerprint": "7fba31346a188bc282163bd6d5966ed782f3becdef68bbf614f5b7585ac3c784",
+      "source_content_sha256": "c6165246ee715669e1d45ee6124da17ff9390437ab69449c229c02a8abd68abd",
+      "disposition": "supplement_draft",
+      "reason": "原文完成一次发酵，但豆沙馅未进入面团，缺最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把原文已发酵面团排气、分割、松弛，包入清单中的豆沙馅并收口，放入适配烤盘或模具。完成末次醒发，用烤箱烘烤成形后取出放凉。不额外加蛋液或其他表面材料。",
+          "ingredient_names": [
+            "全麦面粉",
+            "酸奶",
+            "鸡蛋",
+            "红糖",
+            "盐",
+            "酵母",
+            "软化黄油",
+            "豆沙馅"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_fa6d22ab3c09c92db5177670",
+      "source_name": "猪肉大葱肉饼",
+      "source_fingerprint": "fa6d22ab3c09c92db5177670ec8fa2d0949ca553f072016a29c6210dd912a505",
+      "source_content_sha256": "fe89418011aa0d5830657bacd03e312e1b7654e31ff2f49d9c9472a1217474af",
+      "disposition": "supplement_draft",
+      "reason": "原文只有面团和生肉馅，缺包馅与最后熟化。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把原文已揉好的面团分割、擀成面皮，包入已调好的猪肉大葱馅，收紧接口并压成饼。放入适配的不粘平底锅分面煎制，并继续烹饪使内馅完成熟化；饼皮变色不作为内馅已熟的证明。不额外补煎油或水，原清单水仍按揉面用途保留。",
+          "ingredient_names": [
+            "中筋面粉",
+            "水",
+            "猪肉末",
+            "大葱",
+            "姜",
+            "白糖",
+            "盐",
+            "生抽",
+            "香油",
+            "鸡蛋",
+            "白胡椒粉"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "生肉馅饼组件（原文缺最后熟化）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "锅具与肉饼厚度影响最终熟化，需试做并核查内馅，不能臆定安全时间温度。",
+        "不粘锅可行性需试做；若需额外煎油，须明确修改配方而非暗加。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_cc2234d8beea4d507908f64b",
+      "source_name": "蜂蜜牛奶小餐包",
+      "source_fingerprint": "cc2234d8beea4d507908f64b9d7f1683a618b76980381f6e57b70f66a615794e",
+      "source_content_sha256": "4612b35228089f6379ecf50422447dc9b81896c84c91b3501869b81ca438fe92",
+      "disposition": "supplement_draft",
+      "reason": "原文止于一次发酵，蜂蜜、水和熟白芝麻尚未使用，缺后续成形烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把已发酵面团排气、分割和松弛，整形成小餐包，放入适配烤盘完成末次醒发，用烤箱烘烤成形。建议把清单中尚未使用的蜂蜜和水混匀，薄刷在出炉面包表面，再撒上已声明的熟白芝麻，放凉；刷面是助手选择的用途，不是原文预留说明，不再加蛋液。",
+          "ingredient_names": [
+            "高筋面粉",
+            "牛奶",
+            "鸡蛋",
+            "盐",
+            "细砂糖",
+            "酵母",
+            "软化黄油",
+            "蜂蜜",
+            "水",
+            "熟白芝麻"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "蜂蜜水的分配和刷面用量需按原清单核对。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_699855d09dedcad15cfcc5e4",
+      "source_name": "蛋黄酥",
+      "source_fingerprint": "699855d09dedcad15cfcc5e41c56114519c7f0f13877f9687f549b2ee53ab32b",
+      "source_content_sha256": "c57d3a1b091284520e9e6dfcb874529bd507e2bc43d9056dfcd4f14efa5c3a9e",
+      "disposition": "source_conflict",
+      "reason": "食材栏同时含A/B/C/D与主辅配方，步骤对应量与多组清单混合，不能确定采用哪一配方。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "多套配方混录",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "先由来源方明确配方版本，拆分重复原料、皮馅和表面材料。",
+        "明确蛋黄处理、包馅、成形和最后烘烤后才能给出完整补全版。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_d5ef6fc336b50744996155bc",
+      "source_name": "酸奶小餐包",
+      "source_fingerprint": "d5ef6fc336b50744996155bc9744a5ec92d08792a52224fbf153286f392df5b1",
+      "source_content_sha256": "d20bc4d3516b015e5e99bd9743755c74dbddd3f0262ca6c2c04fec84e2b53447",
+      "disposition": "supplement_draft",
+      "reason": "原文止于一次发酵，全蛋液尚有未用余量且杏仁片未使用，缺最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "将原文已发酵面团排气、分割、松弛和整形，放入适配烤盘并完成末次醒发。使用清单中尚未进入面团的全蛋液薄刷表面，撒上清单中的杏仁片，用烤箱烘烤成形后放凉。",
+          "ingredient_names": [
+            "牛奶",
+            "淡奶油",
+            "全蛋液",
+            "酸奶",
+            "盐",
+            "细砂糖",
+            "酵母",
+            "高筋面粉",
+            "软化黄油",
+            "杏仁片"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "核对原全蛋液总量与面团已用量，不额外增加蛋液。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_7aad3443632c73ab9ecdf89d",
+      "source_name": "椰子玛格丽特",
+      "source_fingerprint": "7aad3443632c73ab9ecdf89d8de66bc168bd350890785a73d937208f10fecf3e",
+      "source_content_sha256": "a4b5e3bc42c89ba6a676027d71a575492f1b1dee7f3f66084718b2b6a3eac56a",
+      "disposition": "source_conflict",
+      "reason": "原文已写180度8～10分钟与冷却，但缺明确烤箱动作；原料黄油95未写单位，解析为黄油95。",
+      "additions": [
+        {
+          "placement": "clarification",
+          "text": "原文温度时间句可作为饼干烘烤的待核查解释。若实际设备为烤箱，接已成形饼干执行原文热处理并放凉，不再加一次烘烤。该说明不修正黄油95的单位，也不把其改成95克。",
+          "ingredient_names": [
+            "黄油95",
+            "糖粉",
+            "鸡蛋",
+            "低筋面粉",
+            "椰子粉"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "黄油数量单位缺失",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "确认黄油95的实际单位。",
+        "确认热处理设备及原设置；助手澄清不算原始动作证据。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_8c0083fdf19386b5805698bd",
+      "source_name": "红豆酥",
+      "source_fingerprint": "8c0083fdf19386b5805698bd2b510f6a1cfef311942132a07bf00bcd3e204b58",
+      "source_content_sha256": "1aeb5b6aae3aae1a9cdffbdbd8c0590e97c80fbaeda8e5633f9950c53ddc37e7",
+      "disposition": "source_conflict",
+      "reason": "面粉清单330g与步骤180g+140g不一致；原文卷成圆柱后缺分切、表面材料及最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "对于原文已经卷成圆柱的生坯，可建议分切、整理后放入适配烤盘，使用清单中的蛋黄液薄刷并撒黑白芝麻，再用烤箱烘烤并放凉。该补充仅针对最后阶段，不解决清单与已用面粉的10g差额，不将其解释成手粉。",
+          "ingredient_names": [
+            "红豆沙",
+            "蛋黄液",
+            "黑白芝麻",
+            "低筋面粉",
+            "黄油",
+            "糖粉",
+            "水"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面粉分配待核对",
+          "dimension": "data_quality"
+        },
+        {
+          "tag": "豆沙酥皮生坯",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "先确认面粉总量与步骤分配的10g差额。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_d4936742ec7c9ad1e272a2bb",
+      "source_name": "肉松手撕面包",
+      "source_fingerprint": "d4936742ec7c9ad1e272a2bbcadc3d7cd82b60f5301b27eabaa8d5ad379c1a13",
+      "source_content_sha256": "88f0307fceaa8a191c24ea1ca9df5f1288763fc1af7b91fa3c624b5370e8356f",
+      "disposition": "supplement_draft",
+      "reason": "原文只有一次发酵，缺已声明沙拉酱和肉松装配及最后烘烤。",
+      "additions": [
+        {
+          "placement": "after_source",
+          "text": "把原文已发酵面团排气、松弛后擀开，涂上清单中的沙拉酱并撒肉松，分割、折叠叠放于适配模具。完成末次醒发，用烤箱烘烤成形，取出放凉。不自行新增酱料或蛋液。",
+          "ingredient_names": [
+            "高筋面粉",
+            "牛奶",
+            "鸡蛋",
+            "细砂糖",
+            "酵母",
+            "盐",
+            "软化黄油",
+            "沙拉酱",
+            "肉松"
+          ]
+        }
+      ],
+      "tag_suggestions": [
+        {
+          "tag": "面团制品（原文缺最后成形烹饪）",
+          "dimension": "culinary_form"
+        }
+      ],
+      "remaining_questions": [
+        "肉松和沙拉酱完整商业配料仍未知，不宣称过敏安全或定量营养。",
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_4e0a80e598e3642f7361b664",
+      "source_name": "糖桂花烤栗子",
+      "source_fingerprint": "4e0a80e598e3642f7361b664defa33390418425a3554f8a8bb40056da9d862fb",
+      "source_content_sha256": "1c0d986859fcb02034973a8ed08767af2dfd9c2aa4fcd0ad76c2b53d0ee2128d",
+      "disposition": "supplement_draft",
+      "reason": "空标签记录有板栗、糖浆等配料，但泛化设备执行不能证明具体烤法。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "糖浆栗子点心（参考）",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "含糖浆",
+          "dimension": "ingredient_structure"
+        }
+      ],
+      "remaining_questions": [
+        "设备实际热处理方式和完成度需核查，不新增健康功效标签。",
+        "干桂花清单5g而步骤使用3g，剩余分配未明确，不自动补用。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_399c4f7317cd741f7f09a79a",
+      "source_name": "冰糖炖官燕",
+      "source_fingerprint": "399c4f7317cd741f7f09a79a5f71bf826fadc616769fe13af4e985b69ebaf219",
+      "source_content_sha256": "502528a987c99571a8d6cfffd8cc9600cdadfc07cd953e2de8c415e303e625e6",
+      "disposition": "supplement_draft",
+      "reason": "空标签记录可识别冰糖等配料，但不应以名称补人群或保健功效。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "甜味燕窝制品（参考）",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "含冰糖",
+          "dimension": "ingredient_structure"
+        }
+      ],
+      "remaining_questions": [
+        "原步骤长时间浸泡与设备流程需另复核；本次不作储存安全或临床功效结论。",
+        "矿泉水总量、两次浸泡用水及冰糖水制备与实际加入量存在未明确的分配，需核对，不能臆补。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_4a7e22adf1a63ce178630435",
+      "source_name": "天使白面包",
+      "source_fingerprint": "4a7e22adf1a63ce178630435988d2aa6f38d0cda59c4521e8b3030c5a7540957",
+      "source_content_sha256": "aee3cd6299fa5a6b961819d467323128fe4006b1337893ae789ed9605762e462",
+      "disposition": "supplement_draft",
+      "reason": "空标签记录缺最后烘烤；保留有限规则已有补全草稿，只补描述性标签。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "面包面团制品（原文缺烘烤）",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "含蛋奶原料",
+          "dimension": "ingredient_structure"
+        }
+      ],
+      "remaining_questions": [
+        "设备温度、时间、模具和终点需试做确认；补充是合理建议，不是原始步骤恢复。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_f14cf5b458b89f80c076cdff",
+      "source_name": "芝士焗龙虾",
+      "source_fingerprint": "f14cf5b458b89f80c076cdffdeba9b13a49562f0a67b79a43301f53f583551a7",
+      "source_content_sha256": "c44efdebaed35155b83dd58e4c9c1650fc1f140d0bdb385aacb241925d5feea1",
+      "disposition": "supplement_draft",
+      "reason": "可识别龙虾和奶酪原料，空标签补描述，不把泛化设备流程认证为焗烤。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "龙虾类制品（参考）",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "含奶酪",
+          "dimension": "ingredient_structure"
+        }
+      ],
+      "remaining_questions": [
+        "沙拉酱完整配料和最终设备流程未知；不据此保证过敏安全。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_1d0ebf6ee7421a19b07aa068",
+      "source_name": "小橘干",
+      "source_fingerprint": "1d0ebf6ee7421a19b07aa0686bbf66dc00e62d34b6e5fe05f2a08924f6541379",
+      "source_content_sha256": "2ec8b662c88741e20c50f1e77879cdceefb57c576491c825cea7b538097c3b6a",
+      "disposition": "supplement_draft",
+      "reason": "原步骤为沃柑去皮、分瓣去籽并摆架，但通用设备执行不足以确认干燥终点。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "橘子加工制品",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "成品工艺待确认",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "核查实际干燥流程与终点，不推断储存条件或食品安全。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_8f4f452ba00949150eebee9e",
+      "source_name": "冰糖烤梨",
+      "source_fingerprint": "8f4f452ba00949150eebee9eb43d3f04d19e49e07979ad14f4677faab32cfe23",
+      "source_content_sha256": "c612f264ea4a7e8ec8f1e1d7cc4b4c6bb3eb1721cdb9936250f51d13509d1f43",
+      "disposition": "supplement_draft",
+      "reason": "梨与冰糖构成甜味水果制品，空标签可补描述，不能当蔬菜正餐或源烤法证据。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "甜味水果点心（参考）",
+          "dimension": "culinary_form"
+        },
+        {
+          "tag": "含冰糖",
+          "dimension": "ingredient_structure"
+        }
+      ],
+      "remaining_questions": [
+        "泛化设备执行未证明烤法或熟化终点；不补保健功效。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_dcbe774adf4b7c9a686529e8",
+      "source_name": "芝士焗榴莲",
+      "source_fingerprint": "dcbe774adf4b7c9a686529e8bb009ad784798f9f69c367d363f228997fefe851",
+      "source_content_sha256": "02b064494b1ba7e351b628d5a787161d8a4d8479d2b3d6b98b93894d36ed7df5",
+      "disposition": "needs_confirmation",
+      "reason": "仅声明商业冷冻半成品名称，完整配方和设备最后成菜过程未明确。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "商业冷冻半成品",
+          "dimension": "processing_record"
+        },
+        {
+          "tag": "完整配方待核查",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "读取实际产品完整配料表及适配烹饪方式后，再判定食材角色、过敏和口味约束。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    },
+    {
+      "recipe_id": "recipe_b5c3bd473c4d2262d1dce4fc",
+      "source_name": "冷冻甘薯薯条",
+      "source_fingerprint": "b5c3bd473c4d2262d1dce4fc77ae6768dc3777e53e6aac50fcd8bcb8571bf7f6",
+      "source_content_sha256": "d53880f9ce5aa78cbb0f3fd6ee65127be8dface72bbd6d6e3bac20be2d119d20",
+      "disposition": "needs_confirmation",
+      "reason": "仅声明商业冷冻半成品名称，完整配方和设备最后成菜过程未明确。",
+      "additions": [],
+      "tag_suggestions": [
+        {
+          "tag": "商业冷冻半成品",
+          "dimension": "processing_record"
+        },
+        {
+          "tag": "完整配方待核查",
+          "dimension": "data_quality"
+        }
+      ],
+      "remaining_questions": [
+        "读取实际产品完整配料表及适配烹饪方式后，再判定食材角色、过敏和口味约束。"
+      ],
+      "reviewer_kind": "assistant",
+      "policy_version": "assistant-preparation-curation-v1"
+    }
+  ]
+}

@@ -9,12 +9,13 @@ from statistics import mean
 from typing import Any
 
 from app.agent.menu_balance import serving_temperature
+from app.domain.cooking_methods import METHOD_VERSION, main_cooking_methods
 from app.domain.models import Recipe
 from app.rules.engine import compact
 
 ROLES = ("vegetable", "protein", "staple", "soup")
 TEMPERATURES = ("hot", "cold", "unknown")
-QUALITY_VERSION = "source-menu-diversity-v1"
+QUALITY_VERSION = "source-menu-diversity-v5"
 
 
 def _ingredient_names(recipe: Recipe) -> set[str]:
@@ -49,7 +50,8 @@ def menu_quality_snapshot(
     categories = Counter(
         category for recipe in recipes for category in set(recipe.categories) if category in ROLES
     )
-    methods = {method for recipe in recipes for method in recipe.methods}
+    source_methods = [main_cooking_methods(recipe) for recipe in recipes]
+    methods = {method for recorded in source_methods for method in recorded}
     temperatures = Counter(serving_temperature(recipe) for recipe in recipes)
     ingredient_sets = [_ingredient_names(recipe) for recipe in recipes]
     overlaps = [
@@ -63,6 +65,9 @@ def menu_quality_snapshot(
         "category_counts": {key: categories[key] for key in ROLES},
         "role_coverage": sum(categories[key] > 0 for key in ROLES[:3]),
         "method_count": len(methods),
+        "method_evidence_version": METHOD_VERSION,
+        "method_known_dishes": sum(bool(recorded) for recorded in source_methods),
+        "method_unknown_dishes": sum(not recorded for recorded in source_methods),
         "temperature_counts": {key: temperatures[key] for key in TEMPERATURES},
         "possible_pairs": len(recipes) * (len(recipes) - 1) // 2,
         "comparable_pairs": len(overlaps),
@@ -85,6 +90,13 @@ def summarize_menu_quality(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]
     ]
     available = [item for item in observations if item.get("status") == "available"]
     unavailable = [item for item in observations if item.get("status") == "unavailable"]
+    method_coverage = [
+        item
+        for item in available
+        if item.get("method_evidence_version") == METHOD_VERSION
+        and "method_known_dishes" in item
+        and "method_unknown_dishes" in item
+    ]
     temperatures = Counter({key: 0 for key in TEMPERATURES})
     for item in available:
         temperatures.update(item["temperature_counts"])
@@ -103,6 +115,14 @@ def summarize_menu_quality(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         "status": "available" if available else "unavailable" if unavailable else "not_run",
         "menus_measured": len(available),
         "menus_unavailable": len(unavailable),
+        "method_evidence_version": METHOD_VERSION,
+        "method_coverage_menus": len(method_coverage),
+        "method_known_dishes": sum(item["method_known_dishes"] for item in method_coverage)
+        if method_coverage
+        else None,
+        "method_unknown_dishes": sum(item["method_unknown_dishes"] for item in method_coverage)
+        if method_coverage
+        else None,
         "unavailable_reasons": dict(
             sorted(Counter(item["reason"] for item in unavailable).items())
         ),

@@ -27,6 +27,7 @@ from app.domain.models import (
     Intent,
     Recipe,
     RestoreMenuIntent,
+    ScopedMethod,
     SessionState,
     UserProfile,
 )
@@ -51,6 +52,25 @@ def _state(**kwargs):
 
 def _restore_original():
     return Intent(restore_menu=RestoreMenuIntent(reference="original"))
+
+
+@pytest.mark.parametrize("requirement", ["composition", "method"])
+def test_restore_preserves_rejections_when_newer_menu_requirements_block_it(catalog, requirement):
+    state = _state()
+    state.revision = 1
+    record_menu_revision(state, ["test_0", "test_1", "test_2"])
+    state.revision = 2
+    record_rejection_action(state, ["test_0", "test_1", "test_2"])
+    state.rejected_recipe_ids = ["test_0", "test_1", "test_2"]
+    state.menu_ids = ["test_3", "test_4", "test_5"]
+    if requirement == "composition":
+        state.constraints.vegetarian_dish_count = 3
+    else:
+        state.constraints.scoped_methods = [ScopedMethod(food="鸡肉", method="炒", slot=2)]
+    before = state.model_dump()
+    issue = apply_menu_restore(state, _restore_original(), RuleEngine(), catalog.recipes)
+    assert issue and "无法直接恢复" in issue
+    assert state.model_dump() == before
 
 
 # --- M1 menu snapshot ---

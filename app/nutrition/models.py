@@ -11,7 +11,7 @@ class NutritionModel(BaseModel):
 
 class IngredientContribution(NutritionModel):
     recipe_id: str
-    source_row: int
+    source_row: int | None
     ingredient_name: str
     roles: list[Literal["protein", "carbohydrate", "fat", "dietary_fiber"]]
     explanation: str
@@ -43,7 +43,7 @@ class NutritionRisk(NutritionModel):
 
 class RecipeNutrition(NutritionModel):
     recipe_id: str
-    source_row: int
+    source_row: int | None
     protein_sources: list[str] = Field(default_factory=list)
     carbohydrate_sources: list[str] = Field(default_factory=list)
     fat_sources: list[str] = Field(default_factory=list)

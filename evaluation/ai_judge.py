@@ -129,8 +129,10 @@ def _git_commit() -> str:
 
 
 def _compact_menu_item(item: dict[str, Any]) -> dict[str, Any]:
-    nutrition = item.get("nutrition") if isinstance(item.get("nutrition"), dict) else {}
-    card = item.get("card") if isinstance(item.get("card"), dict) else {}
+    nutrition = item.get("nutrition")
+    nutrition = nutrition if isinstance(nutrition, dict) else {}
+    card = item.get("card")
+    card = card if isinstance(card, dict) else {}
     return {
         "slot": item.get("slot"),
         "recipe_id": item.get("recipe_id"),
@@ -147,17 +149,12 @@ def _compact_menu_item(item: dict[str, Any]) -> dict[str, Any]:
 def compact_response(response: dict[str, Any]) -> dict[str, Any]:
     """Keep judge-relevant verified facts while excluding verbose/private fields."""
 
-    menu = response.get("menu") if isinstance(response.get("menu"), list) else []
-    suitability = (
-        response.get("diner_suitability")
-        if isinstance(response.get("diner_suitability"), list)
-        else []
-    )
-    nutrition = (
-        response.get("nutrition_analysis")
-        if isinstance(response.get("nutrition_analysis"), dict)
-        else {}
-    )
+    menu = response.get("menu")
+    menu = menu if isinstance(menu, list) else []
+    suitability = response.get("diner_suitability")
+    suitability = suitability if isinstance(suitability, list) else []
+    nutrition = response.get("nutrition_analysis")
+    nutrition = nutrition if isinstance(nutrition, dict) else {}
     return {
         "status": response.get("status"),
         "reason": response.get("reason"),
@@ -296,8 +293,10 @@ SYSTEM_PROMPT = """你是独立的膳食对话质量评审员。你只评审两�
 def judge_system_prompt() -> str:
     """Return the complete versioned prompt, including its output contract."""
 
-    return SYSTEM_PROMPT + "\nJSON Schema:\n" + json.dumps(
-        OrderedJudgment.model_json_schema(), ensure_ascii=False
+    return (
+        SYSTEM_PROMPT
+        + "\nJSON Schema:\n"
+        + json.dumps(OrderedJudgment.model_json_schema(), ensure_ascii=False)
     )
 
 
@@ -311,12 +310,15 @@ class JudgeClient:
         base_url: str,
         model: str,
         timeout_seconds: float = 90.0,
+        max_tokens: int = 1800,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         if not api_key.strip() or not model.strip():
             raise ValueError("Judge API key and model are required")
         if timeout_seconds <= 0:
             raise ValueError("Judge timeout must be positive")
+        if type(max_tokens) is not int or max_tokens <= 0:
+            raise ValueError("Judge completion token budget must be a positive integer")
         url = httpx.URL(base_url)
         if url.scheme not in {"http", "https"} or not url.host or url.username or url.password:
             raise ValueError("Judge base URL must be HTTP(S) without embedded credentials")
@@ -324,6 +326,7 @@ class JudgeClient:
         self.endpoint = base_url.rstrip("/") + "/chat/completions"
         self._api_key = api_key
         self._timeout = timeout_seconds
+        self.max_tokens = max_tokens
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient()
 
@@ -341,7 +344,7 @@ class JudgeClient:
                     ],
                     "response_format": {"type": "json_object"},
                     "temperature": 0,
-                    "max_tokens": 1800,
+                    "max_tokens": self.max_tokens,
                     "stream": False,
                 },
                 timeout=self._timeout,
@@ -355,6 +358,8 @@ class JudgeClient:
         try:
             envelope = response.json()
             choice = envelope["choices"][0]
+            if choice.get("finish_reason") == "length":
+                raise JudgeError("judge output truncated; increase the completion token budget")
             if choice.get("finish_reason") != "stop":
                 raise ValueError("incomplete completion")
             content = choice["message"]["content"]
@@ -382,21 +387,17 @@ def reconcile_case(
     """Reconcile A/B and B/A judgments and normalize scores by system."""
 
     first_winner = _map_winner(first.winner, {"A": "baseline", "B": "candidate"})
-    reversed_winner = _map_winner(
-        reversed_order.winner, {"A": "candidate", "B": "baseline"}
-    )
+    reversed_winner = _map_winner(reversed_order.winner, {"A": "candidate", "B": "baseline"})
     winner = first_winner if first_winner == reversed_winner else "inconclusive"
     baseline_scores: dict[str, float] = {}
     candidate_scores: dict[str, float] = {}
     for dimension in DIMENSIONS:
         baseline_scores[dimension] = round(
-            (getattr(first.scores_a, dimension) + getattr(reversed_order.scores_b, dimension))
-            / 2,
+            (getattr(first.scores_a, dimension) + getattr(reversed_order.scores_b, dimension)) / 2,
             2,
         )
         candidate_scores[dimension] = round(
-            (getattr(first.scores_b, dimension) + getattr(reversed_order.scores_a, dimension))
-            / 2,
+            (getattr(first.scores_b, dimension) + getattr(reversed_order.scores_a, dimension)) / 2,
             2,
         )
     return {
@@ -440,9 +441,7 @@ def _judge_payload(case: dict[str, Any], *, reversed_order: bool) -> dict[str, A
     }
 
 
-async def evaluate_cases(
-    cases: list[dict[str, Any]], client: JudgeClient
-) -> list[dict[str, Any]]:
+async def evaluate_cases(cases: list[dict[str, Any]], client: JudgeClient) -> list[dict[str, Any]]:
     results = []
     for case in cases:
         first = await client.judge(_judge_payload(case, reversed_order=False))
@@ -500,6 +499,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "> 本报告是模型评审证据，不是官方成绩，也不能覆盖硬约束和菜谱真实性门禁。",
         "",
         f"- 裁判模型：`{report['judge']['model']}`",
+        f"- 单次输出 Token 上限：{report['judge'].get('max_tokens', '未记录')}",
         f"- 提示词版本：`{report['judge']['prompt_version']}`",
         f"- 总体偏好：**{summary['preference']}**",
         "- 候选 / 基线 / 平局 / 顺序不一致："
@@ -552,6 +552,7 @@ async def run(args: argparse.Namespace) -> dict[str, Path]:
         base_url=args.judge_base_url,
         model=args.judge_model,
         timeout_seconds=args.timeout,
+        max_tokens=args.max_tokens,
     )
     try:
         results = await evaluate_cases(cases, client)
@@ -567,6 +568,7 @@ async def run(args: argparse.Namespace) -> dict[str, Path]:
             "prompt_version": PROMPT_VERSION,
             "prompt_sha256": hashlib.sha256(judge_system_prompt().encode("utf-8")).hexdigest(),
             "orders_per_case": 2,
+            "max_tokens": args.max_tokens,
         },
         "comparison": comparison_metadata,
         "summary": summarize(results),
@@ -589,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--judge-base-url", default=os.getenv("JUDGE_BASE_URL", ""))
     parser.add_argument("--judge-model", default=os.getenv("JUDGE_MODEL", ""))
+    parser.add_argument("--max-tokens", type=int, default=os.getenv("JUDGE_MAX_TOKENS", "1800"))
     parser.add_argument(
         "--timeout", type=float, default=float(os.getenv("JUDGE_TIMEOUT_SECONDS", "90"))
     )

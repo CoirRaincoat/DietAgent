@@ -10,6 +10,7 @@ import hashlib
 from io import StringIO
 from pathlib import Path
 
+from app.domain.cooking_methods import METHOD_VERSION
 from app.domain.models import UserProfile
 from app.infrastructure.data import PROJECT_ROOT, RECIPE_PATH, DataCatalog, normalize_recipes
 
@@ -51,6 +52,7 @@ def load_synthetic_catalog(project_root: Path | None = None) -> DataCatalog:
         quality_report={
             "schema_version": 1,
             "data_scope": "synthetic",
+            "cooking_method_version": METHOD_VERSION,
             "recipe_count": len(recipes),
             "eligible_recipe_count": sum(recipe.eligible for recipe in recipes.values()),
             "recipe_encoding": "gb18030",

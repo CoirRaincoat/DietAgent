@@ -44,14 +44,14 @@ const roleLabels: Record<string, string> = { protein: '蛋白质', carbohydrate:
           <h3>这道菜的营养来源</h3>
           <dl class="nutrition-sources"><div><dt>蛋白质</dt><dd>{{ item.nutrition.protein_sources.join('、') || '未识别到明确来源' }}</dd></div><div><dt>碳水</dt><dd>{{ item.nutrition.carbohydrate_sources.join('、') || '未识别到明确来源' }}</dd></div><div><dt>脂肪</dt><dd>{{ item.nutrition.fat_sources.join('、') || '未识别到明确来源' }}</dd></div><div><dt>膳食纤维</dt><dd>{{ item.nutrition.dietary_fiber.join('、') || '未识别到明确来源' }}</dd></div></dl>
           <p class="field-note">热量与营养素含量：数据不足，暂无法准确评估。未识别到来源不代表不含该营养素。</p>
-          <details class="trace-details" v-if="item.nutrition.ingredient_contributions.length"><summary>查看食材贡献依据</summary><div v-for="(entry, index) in item.nutrition.ingredient_contributions" :key="index" class="contribution"><strong>{{ entry.ingredient_name }}</strong><span>{{ entry.roles.map(role => roleLabels[role] || role).join(' / ') }}</span><p>{{ entry.explanation }}</p><small>来源行 {{ entry.source_row }} · {{ entry.quantity_recorded ? '有用量记录，未核算摄入量' : '用量未记录' }}</small></div></details>
+          <details class="trace-details" v-if="item.nutrition.ingredient_contributions.length"><summary>查看食材贡献依据</summary><div v-for="(entry, index) in item.nutrition.ingredient_contributions" :key="index" class="contribution"><strong>{{ entry.ingredient_name }}</strong><span>{{ entry.roles.map(role => roleLabels[role] || role).join(' / ') }}</span><p>{{ entry.explanation }}</p><small>{{ entry.source_row == null ? '生成方案声明，非原库行' : `来源行 ${entry.source_row}` }} · {{ entry.quantity_recorded ? '有用量记录，未核算摄入量' : '用量未记录' }}</small></div></details>
           <ul v-if="item.nutrition.suitable_reasons.length" class="reason-list nutrition-reasons"><li v-for="(reason, index) in item.nutrition.suitable_reasons" :key="index">{{ reason }}</li></ul>
           <div v-if="item.nutrition.risks.length" class="risk-box"><strong>需要留意</strong><p v-for="(risk, index) in item.nutrition.risks" :key="index">{{ risk.message }}</p></div>
           <details class="trace-details" v-if="item.nutrition.limitations.length"><summary>数据局限</summary><ul class="reason-list"><li v-for="(limitation, index) in item.nutrition.limitations" :key="index">{{ limitation }}</li></ul></details>
         </section>
         <section class="detail-section source-section">
           <h3>菜谱来源</h3><p>{{ item.source }}</p>
-          <dl v-if="item.provenance"><div><dt>菜谱 ID</dt><dd>{{ item.provenance.recipe_id }}</dd></div><div><dt>数据行</dt><dd>{{ item.provenance.source_row }}</dd></div><div><dt>内容指纹</dt><dd class="fingerprint">{{ item.provenance.fingerprint }}</dd></div></dl>
+          <dl v-if="item.provenance"><div><dt>菜谱 ID</dt><dd>{{ item.provenance.recipe_id }}</dd></div><div><dt>数据行</dt><dd>{{ item.provenance.source_row == null ? '无（新生成方案）' : item.provenance.source_row }}</dd></div><div v-if="item.provenance.origin === 'generated'"><dt>生成版本</dt><dd>{{ item.provenance.generator_version }} · 待试做</dd></div><div><dt>内容指纹</dt><dd class="fingerprint">{{ item.provenance.fingerprint }}</dd></div></dl>
           <p v-else class="muted">菜谱 ID：{{ item.recipe_id }}；更多来源信息未提供。</p>
           <p class="field-note">食材、步骤和来源均来自后端返回；展示图为抽象占位图。</p>
         </section>

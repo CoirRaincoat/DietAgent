@@ -46,9 +46,9 @@ function tabKeys(event: KeyboardEvent) {
     </div>
     <div v-if="activeTab === 'menu'" id="menu-tabpanel" role="tabpanel" aria-labelledby="menu-tab" class="menu-content" :aria-busy="busy">
       <template v-if="menu.length">
-        <div class="menu-intro"><p>来自真实菜谱库，按本餐需求筛选。</p><button type="button" :disabled="busy" @click="$emit('explain')">解释这份菜单 <span aria-hidden="true">↗</span></button></div>
+        <div class="menu-intro"><p>按本餐需求筛选，具体来源见各菜品。</p><button type="button" :disabled="busy" @click="$emit('explain')">解释这份菜单 <span aria-hidden="true">↗</span></button></div>
         <div class="dish-grid"><DishCard v-for="item in menu" :key="`${item.slot}-${item.recipe_id}`" :item="item" :busy="busy" :changed="changedSlots.includes(item.slot)" @details="selectedDish = $event" @replace="$emit('replace', $event)" /></div>
-        <div class="menu-footnote"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 2 3 4v5c0 3 4 5 6 6 2-1 6-3 6-6V4L9 2Z" stroke="currentColor" stroke-width="1.2"/><path d="m6 8 2 2 4-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>食材与步骤可追溯到原始菜谱；营养仅作定性解释。</span></div>
+        <div class="menu-footnote"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 2 3 4v5c0 3 4 5 6 6 2-1 6-3 6-6V4L9 2Z" stroke="currentColor" stroke-width="1.2"/><path d="m6 8 2 2 4-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>食材与步骤依据见菜谱详情；营养仅作定性解释。</span></div>
         <details v-if="result?.replacement_suggestions.length" class="suggestions"><summary>探索替换思路 <span>{{ result.replacement_suggestions.length }} 个库内候选</span></summary><p class="suggestion-note">候选供查看；“换一道”会让 Agent 为该位置重新选择，不能指定候选 ID。</p><div class="suggestion-grid"><article v-for="candidate in result.replacement_suggestions" :key="candidate.recipe_id"><span class="candidate-slot">第 {{ candidate.slot }} 道的候选</span><h3>{{ candidate.name }}</h3><p>{{ candidate.replacement_reason || candidate.reasons[0] || '来自相同约束下的候选菜谱。' }}</p><button type="button" @click="selectedDish = candidate">查看候选详情 <span aria-hidden="true">↗</span></button></article></div></details>
       </template>
       <div v-else class="menu-empty">

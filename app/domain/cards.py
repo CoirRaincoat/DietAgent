@@ -1,5 +1,7 @@
 """Independent API card contracts; no dependency on domain recipe models."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,5 +27,7 @@ class RecipeProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     recipe_id: str
-    source_row: int = Field(ge=1)
+    source_row: int | None = Field(ge=1)
     fingerprint: str
+    origin: Literal["catalog", "generated"] = "catalog"
+    generator_version: str | None = None

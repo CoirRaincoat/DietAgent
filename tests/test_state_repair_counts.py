@@ -162,7 +162,9 @@ def test_old_valid_menu_is_history_during_conflict_and_partial_correction(tmp_pa
             assert result["status"] == "clarification_required" and result["menu"] == []
             assert result["conversation_state"]["menu_ids"] == old_ids
             assert not result["conversation_state"]["menu_valid"]
-            assert result["conversation_state"]["constraints"]["dish_count"] == 4
+            # The preserved literal first input "4菜1汤" means 4 + 1 under
+            # the source branch's explicit menu-count convention, not 4 total.
+            assert result["conversation_state"]["constraints"]["dish_count"] == 5
             assert result["conversation_state"]["constraints"]["soup_count"] == 1
             assert result["conversation_state"]["pending_menu_counts"] == {
                 "dish_count": 2, "soup_count": 3,
@@ -307,7 +309,7 @@ def test_openai_json_and_sse_recover_count_conflict_through_real_adapter(tmp_pat
     assert final.constraints.allergies == ["花生"]
     assert "本餐菜单：" in text
     assert all(catalog.recipes[key].name in text for key in final.menu_ids)
-    assert len(observed) == 3  # Two parse calls and one verified-facts explanation, no retry.
+    assert len(observed) == 2  # Two parses; verified explanation is local, no retry.
     assert observed[1]["pending_menu_counts"] == {"dish_count": 2, "soup_count": 3}
 
 

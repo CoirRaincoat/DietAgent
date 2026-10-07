@@ -89,7 +89,10 @@ def test_full_menu_tool_calls_and_replacement_preserves_other_slots(tmp_path, ca
         assert "搭配上包含" in first["reason"]
         assert "蔬菜类菜" in first["reason"]
         assert "recipe_id" not in first["reason"]
-        assert "未计算蛋白质" not in first["reason"]
+        # A configured goal now has mandatory evidence and limitations, even
+        # when the model selects only an opening. No intake success is claimed.
+        assert "未计算蛋白质克数或增肌效果" in first["reason"]
+        assert "营养达标评分" in first["reason"]
         assert "工程评分" not in first["reason"]
         assert "/100" not in first["reason"]
         assert all(item["recipe_id"] in catalog.recipes for item in first["menu"])
@@ -482,6 +485,126 @@ def test_explicit_menu_structure_is_not_overridden_by_party_defaults(tmp_path, c
     assert result["conversation_state"]["menu_structure_explicit"] is True
 
 
+@pytest.mark.parametrize("message,total,soups", [
+    ("3人晚餐，没有其他忌口，安排4道菜，其中1道汤。", 4, 1),
+    ("3人晚餐，没有其他忌口，共四道菜，包含一道汤。", 4, 1),
+    ("3人晚餐，没有其他忌口，四菜一汤。", 5, 1),
+    ("3人晚餐，没有其他忌口，安排3道菜，不要汤。", 3, 0),
+])
+def test_explicit_menu_numbers_correct_valid_but_wrong_model_counts(
+    tmp_path, catalog, message, total, soups
+):
+    llm = ScriptedLLM([complete_intent(people=3, dish_count=6, soup_count=1)])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post("/chat", json={"user_id": 3, "message": message}).json()
+    assert result["status"] == "ok"
+    assert len(result["menu"]) == total
+    assert result["conversation_state"]["constraints"]["dish_count"] == total
+    assert result["conversation_state"]["constraints"]["soup_count"] == soups
+    assert sum("soup" in catalog.recipes[item["recipe_id"]].categories
+               for item in result["menu"]) == soups
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_answering_pending_allergy_resumes_requested_menu_without_extra_confirmation(
+    tmp_path, catalog, restart
+):
+    catalog.profiles[3].allergies = ["鸡蛋"]
+    first_llm = ScriptedLLM([complete_intent(allergies=["神秘酱料"])])
+    answer_intent = Intent(
+        action="clarify", allergies=["芝麻"],
+        allergy_clarifications={"神秘酱料": ["芝麻"]},
+        clarification="已记录芝麻过敏，是否现在推荐晚餐？",
+    )
+    if not restart:
+        first_llm.intents.append(answer_intent)
+    with client_for(tmp_path, catalog, first_llm) as client:
+        first = client.post("/chat", json={
+            "user_id": 3, "message": "1人晚餐，神秘酱料过敏，安排3道菜，不要汤。",
+        }).json()
+        assert first["status"] == "clarification_required"
+        sid = first["conversation_state"]["session_id"]
+        if not restart:
+            final = client.post("/chat", json={
+                "user_id": 3, "message": "原来说的神秘酱料具体是芝麻。", "session_id": sid,
+            }).json()
+    if restart:
+        with client_for(tmp_path, catalog, ScriptedLLM([answer_intent])) as client:
+            final = client.post("/chat", json={
+                "user_id": 3, "message": "原来说的神秘酱料具体是芝麻。", "session_id": sid,
+            }).json()
+    assert final["status"] == "ok"
+    assert len(final["menu"]) == 3
+    assert final["clarification_questions"] == []
+    assert set(final["conversation_state"]["constraints"]["allergies"]) == {"鸡蛋", "芝麻"}
+    assert not final["conversation_state"]["pending_allergy_terms"]
+    assert not final["conversation_state"]["pending_plan"]
+    assert all("鸡蛋" not in item["ingredients"] and "芝麻" not in item["ingredients"]
+               for item in final["menu"])
+
+
+@pytest.mark.parametrize("answer", [
+    "原来说的神秘酱料具体是芝麻，先别推荐。",
+    "原来说的神秘酱料具体是芝麻，计算精确蛋白质。",
+    "原来说的神秘酱料具体是芝麻吗？",
+])
+def test_allergy_answer_with_another_request_keeps_model_clarification(
+    tmp_path, catalog, answer
+):
+    llm = ScriptedLLM([
+        complete_intent(allergies=["神秘酱料"]),
+        Intent(action="clarify", allergies=["芝麻"],
+               allergy_clarifications={"神秘酱料": ["芝麻"]}, clarification="请确认本轮要求。"),
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/chat", json={
+            "user_id": 3, "message": "1人晚餐，神秘酱料过敏，安排3道菜。",
+        }).json()
+        final = client.post("/chat", json={
+            "user_id": 3, "message": answer,
+            "session_id": first["conversation_state"]["session_id"],
+        }).json()
+    assert final["status"] == "clarification_required"
+    assert final["menu"] == []
+
+
+def test_allergy_answer_without_an_existing_plan_request_does_not_start_planning(
+    tmp_path, catalog
+):
+    llm = ScriptedLLM([
+        complete_intent(action="clarify", allergies=["神秘酱料"], clarification="具体是什么？"),
+        Intent(action="clarify", allergies=["芝麻"],
+               allergy_clarifications={"神秘酱料": ["芝麻"]}, clarification="你希望安排什么餐？"),
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/chat", json={
+            "user_id": 3, "message": "我对神秘酱料过敏。",
+        }).json()
+        final = client.post("/chat", json={
+            "user_id": 3, "message": "原来说的神秘酱料具体是芝麻。",
+            "session_id": first["conversation_state"]["session_id"],
+        }).json()
+    assert final["status"] == "clarification_required"
+    assert final["menu"] == []
+    assert not final["conversation_state"]["pending_plan"]
+
+
+@pytest.mark.parametrize("message", [
+    "1人晚餐，没有其他忌口，安排4道菜还是5道菜？",
+    "1人晚餐，没有其他忌口，安排2道菜，其中3道汤。",
+    "1人晚餐，没有其他忌口，安排9道菜。",
+])
+def test_conflicting_or_out_of_range_literal_counts_do_not_produce_a_menu(
+    tmp_path, catalog, message
+):
+    llm = ScriptedLLM([complete_intent(dish_count=3, soup_count=0)])
+    with client_for(tmp_path, catalog, llm) as client:
+        result = client.post("/chat", json={"user_id": 3, "message": message}).json()
+    assert result["status"] == "clarification_required"
+    assert result["menu"] == []
+    assert not result["conversation_state"]["menu_valid"]
+
+
 def test_unknown_attributed_allergen_stops_planning(tmp_path, catalog):
     llm = ScriptedLLM([
         complete_intent(
@@ -679,7 +802,8 @@ def test_openai_renders_every_verified_dish_with_minimal_selected_facts(tmp_path
         content = response.json()["choices"][0]["message"]["content"]
     assert "只将第 2 道" in expected["reason"]
     assert "其他菜保持不变" in expected["reason"]
-    assert "未计算蛋白质" not in expected["reason"]
+    assert "未计算蛋白质克数或增肌效果" in expected["reason"]
+    assert "营养达标评分" in expected["reason"]
     for dish in expected["menu"]:
         assert f'{dish["slot"]}. {dish["name"]}' in content
         assert dish["recipe_id"] in content

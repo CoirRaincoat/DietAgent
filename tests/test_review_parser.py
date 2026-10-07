@@ -65,7 +65,12 @@ async def test_attributed_allergy_survives_real_adapter_replace_and_explain(tmp_
         assert fifth.menu == []
         saved = store.get(sid, 3)
         assert saved.constraints.allergies == ["花生"]
-        assert saved.pending_allergy
+        # Either the legacy session-level uncertainty or the newly attributed
+        # mother's unresolved fact must survive. Neither may publish a menu.
+        assert saved.pending_allergy or any(
+            diner.display_name == "妈妈" and diner.attendance and diner.pending_allergy
+            for diner in saved.diners
+        )
 
 
 @pytest.mark.parametrize("initial_allergies", [["神秘酱料"], ["鸡蛋", "神秘酱料"]])

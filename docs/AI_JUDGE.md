@@ -30,9 +30,12 @@ JUDGE_API_KEY=replace-me
 JUDGE_BASE_URL=https://provider.example/v1
 JUDGE_MODEL=independent-judge-model
 JUDGE_TIMEOUT_SECONDS=90
+JUDGE_MAX_TOKENS=8192
 ```
 
 裁判最好与生成回答的模型来自不同模型系列，以降低自我偏好。该接口要求服务兼容 `/chat/completions` 和 JSON mode。
+
+`JUDGE_MAX_TOKENS` 控制每次评审的 completion 上限；未设置时保留兼容默认值 1800。思考模型的推理也可能消耗该预算。DeepSeek V4 Pro 的本地实测在 1800 上限下曾返回 `finish_reason=length`，正式 JSON 为空；可先使用 8192 并检查实际返回，不能把截断判断当作有效分数。增大上限可能增加费用和耗时，输出仍必须以 `stop` 结束且通过完整结构校验。记录模型、提示词哈希和预算，不混合不同配置的 A/B 判断。[DeepSeek 官方接口说明](https://api-docs.deepseek.com/api/create-chat-completion/)
 
 ## 运行
 

@@ -1,7 +1,7 @@
 // Transport types mirror backend schema_version=2.0; no frontend nutrient estimates.
 export interface Ingredient { raw: string; name: string; quantity: number | null; unit: string | null }
 export interface NutritionSource { source_id: string; title: string; url: string }
-export interface IngredientContribution { recipe_id: string; source_row: number; ingredient_name: string; roles: ('protein' | 'carbohydrate' | 'fat' | 'dietary_fiber')[]; explanation: string; quantity_recorded: boolean }
+export interface IngredientContribution { recipe_id: string; source_row: number | null; ingredient_name: string; roles: ('protein' | 'carbohydrate' | 'fat' | 'dietary_fiber')[]; explanation: string; quantity_recorded: boolean }
 export interface GoalMatch { goal: string; status: 'preference_match' | 'caution' | 'insufficient_data'; ingredient_names: string[]; methods: string[]; reasons: string[]; limitation: string; sources: NutritionSource[] }
 export interface NutritionRisk { code: string; message: string; ingredient_names: string[]; recipe_ids: string[] }
 export interface NutritionBase {
@@ -9,19 +9,20 @@ export interface NutritionBase {
   ingredient_contributions: IngredientContribution[]; goal_matches: GoalMatch[];
   suitable_reasons: string[]; risks: NutritionRisk[]; limitations: string[]; analysis_type: 'qualitative';
 }
-export interface RecipeNutrition extends NutritionBase { recipe_id: string; source_row: number }
+export interface RecipeNutrition extends NutritionBase { recipe_id: string; source_row: number | null }
 export interface MenuNutrition extends NutritionBase { recipe_ids: string[]; recipe_analyses: RecipeNutrition[] }
 export interface MenuItem {
   slot: number; recipe_id: string; name: string; ingredients: string[]; steps: string;
   reasons: string[]; nutrition_notes: string[]; source: string;
   card: { title: string; subtitle: string; badges: string[]; image_url: null; cooking_minutes: null; servings: null } | null;
   ingredient_details: Ingredient[]; cooking_steps: {number: number; description: string}[];
-  provenance: {recipe_id: string; source_row: number; fingerprint: string} | null;
+  provenance: {recipe_id: string; source_row: number | null; fingerprint: string; origin?: 'catalog' | 'generated'; generator_version?: string | null} | null;
   nutrition: RecipeNutrition | null; replacement_reason: string | null;
 }
 export interface Constraints {
   allergies: string[]; excluded_ingredients: string[]; preferred_ingredients: string[]; inventory: string[] | null;
   preferences: string[]; health_goals: string[]; no_spicy: boolean; meal_type: string;
+  slot_food_exclusions?: Record<string, string[]>;
   dish_count: number; soup_count: number; people: number; max_minutes: number | null;
 }
 export interface Diner {
