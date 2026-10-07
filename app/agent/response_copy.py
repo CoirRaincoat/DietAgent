@@ -72,6 +72,10 @@ def _change_copy(
     if intent.action == "reject":
         return "已按原有要求重新安排整份菜单，上一版菜品没有继续沿用。"
     if intent.action == "replace":
+        if intent.replace_slots:
+            details = [f"第{slot}道“{before.name}”→“{after.name}”"
+                       for slot, before, after in changes if before is not None and after is not None]
+            return "已按你的要求一并调整：" + "；".join(details) + "。明确保留及未授权菜位的完整菜谱不变。"
         if len(changes) == 1 and changes[0][1] is not None and changes[0][2] is not None:
             slot, before, after = changes[0]
             assert before is not None and after is not None
@@ -101,6 +105,8 @@ def _constraint_copy(constraints: Constraints) -> str:
         requirements.append("避开" + "、".join(constraints.allergies))
     if constraints.excluded_ingredients:
         requirements.append("不含" + "、".join(constraints.excluded_ingredients))
+    for slot, foods in sorted(constraints.slot_food_exclusions.items()):
+        requirements.append(f"仅第{slot}道不含" + "、".join(foods) + "（不等于整餐禁用）")
     if constraints.no_spicy:
         requirements.append("不辣")
     if constraints.inventory is not None:

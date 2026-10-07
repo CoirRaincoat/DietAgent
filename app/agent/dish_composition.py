@@ -79,6 +79,7 @@ def plan_composition(
     choose: Callable[[list[Recipe], list[Recipe]], Recipe],
     replace_slot: int | None = None,
     choose_slot: Callable[[list[Recipe], list[Recipe], int], Recipe] | None = None,
+    edit_slots: set[int] | None = None,
 ) -> CompositionPlan:
     """Preserve feasible old slots, then choose with disjoint-group look-ahead.
 
@@ -149,7 +150,8 @@ def plan_composition(
     slots: list[Recipe | None] = [None] * constraints.dish_count
     for index, old in enumerate(current[: constraints.dish_count]):
         selected = [r for r in slots if r is not None]
-        protect = replace_slot is not None and index != replace_slot - 1
+        protect = (replace_slot is not None and index != replace_slot - 1
+                   or edit_slots is not None and index + 1 not in edit_slots)
         if (
             old.recipe_id in pool
             and old.recipe_id not in {r.recipe_id for r in selected}

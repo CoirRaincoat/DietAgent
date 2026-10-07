@@ -1,6 +1,6 @@
 """Serializable contracts shared by data, rules, planner and agent modules."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
@@ -10,6 +10,7 @@ from app.nutrition.models import MenuNutrition, RecipeNutrition
 DietMode = Literal["omnivore", "ovo_lacto_vegetarian", "vegan"]
 MethodMealPriority = Literal["meal", "method"]
 CookingMethod = Literal["蒸", "煮", "炖", "炒", "烤", "煎", "炸", "烧", "焖", "拌"]
+MenuSlot = Annotated[int, Field(ge=1, le=8)]
 
 
 class DomainModel(BaseModel):
@@ -140,6 +141,8 @@ class Constraints(DomainModel):
     inventory: list[str] | None = None
     preferences: list[str] = Field(default_factory=list)
     scoped_methods: list[ScopedMethod] = Field(default_factory=list)
+    # Meal-local preference exclusions, never allergies or profile facts.
+    slot_food_exclusions: dict[MenuSlot, list[str]] = Field(default_factory=dict)
     health_goals: list[str] = Field(default_factory=list)
     no_spicy: bool = False
     diet_mode: DietMode = "omnivore"
@@ -194,6 +197,7 @@ class Intent(DomainModel):
     # Literal empty continuation of a completed legal menu: validate/report,
     # never call menu sorting. Not model-selectable or persisted authority.
     _retain_completed_menu: bool = PrivateAttr(default=False)
+    _local_food_scopes: dict[int, list[str]] = PrivateAttr(default_factory=dict)
     action: Literal["plan", "replace", "reject", "explain", "clarify"] = "plan"
     excluded_ingredients: list[str] = Field(default_factory=list)
     revoke_exclusions: list[str] = Field(default_factory=list, max_length=30)
@@ -221,6 +225,9 @@ class Intent(DomainModel):
     clear_time_limit: bool = False
     replace_slot: int | None = Field(default=None, ge=1, le=8)
     replace_name: str | None = None
+    replace_slots: list[MenuSlot] = Field(default_factory=list, max_length=8)
+    keep_slots: list[MenuSlot] = Field(default_factory=list, max_length=8)
+    local_excluded_ingredients: list[str] = Field(default_factory=list, max_length=30)
     query_terms: list[str] = Field(default_factory=list)
     clarification: str | None = None
     method_meal_priority: MethodMealPriority | None = None
@@ -299,6 +306,8 @@ class ContextReplacementScope(DomainModel):
 
     replace_slot: int | None = Field(default=None, ge=1, le=8)
     replace_name: str | None = None
+    replace_slots: list[MenuSlot] = Field(default_factory=list, max_length=8)
+    keep_slots: list[MenuSlot] = Field(default_factory=list, max_length=8)
     menu_ids: list[str] = Field(min_length=1, max_length=8)
     target_confirmed: bool = True
     whole_menu_authorized: bool = False

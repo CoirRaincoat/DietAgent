@@ -18,6 +18,7 @@ from app.domain.models import (
     SessionState,
 )
 from app.domain.scoped_methods import missing_scoped_methods
+from app.domain.slot_food_exclusions import scoped_food_menu_issue
 from app.rules.engine import RuleEngine, compact
 
 
@@ -118,6 +119,7 @@ def apply_menu_restore(
         or not dessert_structure_satisfied(chosen, state.constraints)
         or not composition_satisfied(chosen, state.constraints)
         or missing_scoped_methods(chosen, state.constraints.scoped_methods, required_only=True)
+        or scoped_food_menu_issue(chosen, state.constraints, rules)
     ):
         return "历史菜单不满足当前荤素结构或明确做法要求，无法直接恢复；请核对要求后重试。"
     # Undo exactly the rejection delta that rejected this menu revision.

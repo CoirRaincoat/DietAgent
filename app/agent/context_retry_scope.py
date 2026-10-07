@@ -23,6 +23,13 @@ def resolve_replacement_target(
     """
     if intent.action != "replace":
         return intent, None
+    if intent.replace_slots:
+        slots = intent.replace_slots
+        if (len(set(slots)) != len(slots) or any(not 1 <= s <= len(current) for s in [*slots, *intent.keep_slots])
+                or set(slots) & set(intent.keep_slots)
+                or intent.replace_slot is not None or intent.replace_name is not None):
+            return intent, "多菜位保留/替换范围冲突或超出当前菜单，请核对；不调整其他菜位。"
+        return intent, None
     slot = intent.replace_slot
     if slot is not None and not 1 <= slot <= len(current):
         return intent, "指定的换菜序号不在当前菜单中，请明确菜位；未扩大为整餐调整。"
@@ -82,22 +89,28 @@ def preserve_context_retry_scope(state: SessionState, intent: Intent, message: s
     if pending.whole_menu_authorized:
         if (
             not pending.target_confirmed
-            or pending.replace_slot is None
-            or not 1 <= pending.replace_slot <= len(pending.menu_ids)
+            or (not pending.replace_slots and (pending.replace_slot is None
+                or not 1 <= pending.replace_slot <= len(pending.menu_ids)))
         ):
             return Intent(
                 action="clarify",
                 clarification="已记录整餐调整许可，但原换菜目标尚未唯一确认；请明确菜位，或回复“重新规划本餐菜单”以新任务替代原换菜请求。",
             )
         result = intent.model_copy(
-            update={"action": "plan", "replace_slot": None, "replace_name": None}
+            update={"action": "plan", "replace_slot": None, "replace_name": None,
+                    "replace_slots": [], "keep_slots": [], "local_excluded_ingredients": []}
         )
-        result._replacement_exclusions = frozenset({pending.menu_ids[pending.replace_slot - 1]})
+        targets = pending.replace_slots or [pending.replace_slot]
+        result._replacement_exclusions = frozenset(pending.menu_ids[s - 1] for s in targets)
         return result
+    if pending.replace_slots and not pending.target_confirmed:
+        return Intent(action="clarify", clarification="原多菜位范围尚未确认，请重新明确保留和替换菜位；继续不扩大修改权限。")
     return intent.model_copy(
         update={
             "action": "replace",
             "replace_slot": pending.replace_slot,
             "replace_name": pending.replace_name,
+            "replace_slots": pending.replace_slots,
+            "keep_slots": pending.keep_slots,
         }
     )

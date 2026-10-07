@@ -49,6 +49,7 @@ from app.agent.flavor_withdrawal import apply_flavor_withdrawals, direct_flavor_
 from app.agent.food_exclusions import explicit_food_exclusions, explicit_query_food_preferences
 from app.agent.history_restore import apply_constraint_restore
 from app.agent.menu_balance import analyze_menu_balance
+from app.agent.menu_edit_scope import ground_menu_edit
 from app.agent.menu_restore import apply_menu_restore, record_menu_revision, record_rejection_action
 from app.agent.menu_structure import explicit_menu_structure, explicit_soup_composition
 from app.agent.method_meal_tradeoff import (
@@ -119,6 +120,7 @@ from app.domain.scoped_methods import (
     missing_scoped_methods,
     scoped_method_mask,
 )
+from app.domain.slot_food_exclusions import scoped_food_menu_issue, slot_food_allowed
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.sessions import SessionStore
@@ -290,7 +292,12 @@ class MealAgent:
                 # Independently grounded safety assertions are checked below.
                 intent = self._read_only_intent(state, intent, message)
             if read_only_authority is None:
+                current_menu = [self._recipes(state)[rid] for rid in state.menu_ids
+                                if rid in self._recipes(state)]
+                intent, edit_issue = ground_menu_edit(intent, message, current_menu, self.rules)
                 intent = preserve_context_retry_scope(state, intent, message)
+            else:
+                edit_issue = None
             pending_tradeoff = state.pending_method_tradeoff
             priority_choice = literal_priority_choice(message)
             priority_answer = False
@@ -425,6 +432,11 @@ class MealAgent:
                 and not flavor_resolution_answer
             )
             if new_meal_boundary:
+                # Position-local dislikes belong to this meal, not profiles or
+                # every future meal. A literal new-meal boundary ends them.
+                state.constraints.slot_food_exclusions = {}
+                if state.meal_constraints is not None:
+                    state.meal_constraints.slot_food_exclusions = {}
                 # Preserve all requirements/diners and unknown safety questions.
                 # A failed/rejected planning attempt must not erase the last
                 # returned recommendation. Legacy snapshots are not backfilled
@@ -469,17 +481,18 @@ class MealAgent:
             if intent.action == "replace":
                 literal_slots = {request.slot for request in explicit_scoped_methods(message)
                                  if request.slot is not None}
-                if literal_slots and literal_slots != {intent.replace_slot}:
+                if literal_slots and not literal_slots.issubset(set(intent.replace_slots or [intent.replace_slot])):
                     target_issue = "原文明确的做法换菜位与解析目标不一致，请确认要换第几道；本轮不撤回旧做法要求或更换其他菜位。"
             context_questions: list[ClarificationQuestion] = []
             issue = self._apply_intent(state, intent, message,
                                        context_questions=context_questions, method_menu=current_records,
-                                       replacement_confirmed=target_issue is None)
-            issue = issue or target_issue
+                                       replacement_confirmed=target_issue is None and edit_issue is None)
+            issue = issue or edit_issue or target_issue
             if intent.action == "replace" and state.menu_ids:
                 state.pending_context_replacement = ContextReplacementScope(
                     replace_slot=intent.replace_slot, replace_name=intent.replace_name,
-                    target_confirmed=target_issue is None,
+                    replace_slots=intent.replace_slots, keep_slots=intent.keep_slots,
+                    target_confirmed=target_issue is None and edit_issue is None,
                     menu_ids=list(state.menu_ids),
                 )
             if issue is None and read_only_authority == "conflict":
@@ -632,6 +645,10 @@ class MealAgent:
         meal_constraints = state.meal_constraints or state.constraints.model_copy(deep=True)
         state.meal_constraints = meal_constraints
         constraints = meal_constraints
+        if replacement_confirmed and intent.local_excluded_ingredients:
+            for slot, foods in intent._local_food_scopes.items():
+                constraints.slot_food_exclusions[slot] = _merge(
+                    constraints.slot_food_exclusions.get(slot, []), foods)
         count_issue = apply_menu_counts(state, intent)
         if dessert_count is not None:
             constraints.dessert_count = dessert_count
@@ -639,12 +656,21 @@ class MealAgent:
         restore_issue = apply_constraint_restore(state, intent)
         revoke_issue = apply_revoke_exclusion(state, intent, message)
         if intent.action in {"plan", "replace", "reject"}:
-            constraints.scoped_methods = amend_scoped_methods(
-                constraints.scoped_methods, explicit_scoped_methods(message),
-                menu=method_menu or (), local=intent.action == "replace",
-                replace_slot=intent.replace_slot if replacement_confirmed else None,
-                message=message,
-            )
+            incoming_methods = explicit_scoped_methods(message)
+            if intent.replace_slots and replacement_confirmed:
+                if any(request.slot is None for request in incoming_methods):
+                    structure_issue = structure_issue or "多菜位的新做法要求尚未指向具体菜位，请分别说明；不把局部做法扩为整餐要求。"
+                for slot in intent.replace_slots:
+                    constraints.scoped_methods = amend_scoped_methods(
+                        constraints.scoped_methods, [r for r in incoming_methods if r.slot == slot],
+                        menu=method_menu or (), local=True, replace_slot=slot, message=message)
+            else:
+                constraints.scoped_methods = amend_scoped_methods(
+                    constraints.scoped_methods, incoming_methods,
+                    menu=method_menu or (), local=intent.action == "replace",
+                    replace_slot=intent.replace_slot if replacement_confirmed else None,
+                    message=message,
+                )
         for name, value in soup_composition.items():
             setattr(constraints, name, value)
         if counts.get("soup_count") == 0 and not structure_issue and not soup_composition:
@@ -1013,6 +1039,8 @@ class MealAgent:
             items.append("已列过敏食材：" + "、".join(constraints.allergies))
         if constraints.excluded_ingredients:
             items.append("排除食材：" + "、".join(constraints.excluded_ingredients))
+        for slot, foods in sorted(constraints.slot_food_exclusions.items()):
+            items.append(f"仅第{slot}道不含：" + "、".join(foods) + "（不是整餐禁用）")
         if constraints.no_spicy:
             items.append("共享菜单不含已识别的辣味配料")
         if constraints.health_goals:
@@ -1104,6 +1132,7 @@ class MealAgent:
         verified_generated = verified_generated_recipe(recipe)
         if (
             not decision.allowed
+            or not slot_food_allowed(recipe, slot, constraints, self.rules)
             or not is_menu_recipe(recipe, constraints)
             or (recipe.recipe_id not in self.catalog.recipes and not verified_generated)
         ):
@@ -1211,6 +1240,7 @@ class MealAgent:
                 or not dessert_structure_satisfied(current, constraints)
                 or not composition_satisfied(current, constraints)
                 or missing_scoped_methods(current, constraints.scoped_methods, required_only=True)
+                or scoped_food_menu_issue(current, constraints, self.rules)
             ):
                 return self._unresolved(
                     state, "当前没有满足已知约束的完整菜单，请先规划本餐。",
@@ -1258,6 +1288,7 @@ class MealAgent:
             planning = self.tools.call(
                 "menu_modify", events, candidates=safe, constraints=constraints, current=current,
                 replace_slot=replace_slot,
+                replace_slots=intent.replace_slots,
                 reject_ids=rejected_ids,
                 query_terms=query_terms,
                 # An empty continuation is not permission to optimize slots
@@ -1380,7 +1411,7 @@ class MealAgent:
                     planning.failure += " " + " ".join(generation_warnings)
             # The existing method/meal alternatives contain ordinary dishes
             # only; they must not discard explicit dessert allocations.
-            if not planning.failure and recheck and not constraints.dessert_count:
+            if not planning.failure and recheck and not constraints.dessert_count and not intent.replace_slots:
                 trade_candidates = safe
                 if replace_slot is not None:
                     target = current[replace_slot - 1]
@@ -1406,6 +1437,7 @@ class MealAgent:
             or not dessert_structure_satisfied(chosen, constraints)
             or any(recipe.recipe_id in rejected_ids for recipe in chosen)
             or not composition_satisfied(chosen, constraints)
+            or scoped_food_menu_issue(chosen, constraints, self.rules)
         ):
             raise RuntimeError("Final menu structure validation failed")
         menu = [self._item(recipe, i + 1, constraints, events) for i, recipe in enumerate(chosen)]
@@ -1414,6 +1446,8 @@ class MealAgent:
         # Keep the current slot's role and verified food constraints while
         # rotating equally suitable alternatives between conversations.
         for candidate in replacement_candidates(chosen, safe, state.session_id, constraints=constraints, rules=self.rules):
+            if not slot_food_allowed(candidate, 1, constraints, self.rules):
+                continue
             suggestion = self._item(candidate, 1, constraints, events)
             suggestion.replacement_reason = "可替换第 1 道菜，其他菜不变；食材限制已核对。"
             suggestions.append(suggestion)

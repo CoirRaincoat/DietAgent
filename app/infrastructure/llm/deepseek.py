@@ -284,6 +284,7 @@ class DeepSeekLLM(BaseLLM):
             "excluded_ingredients", "revoke_exclusions", "allergies",
             "preferred_ingredients", "health_goals", "preferences", "inventory",
             "query_terms",
+            "local_excluded_ingredients",
         ):
             values = getattr(intent, field)
             if values is not None and (
@@ -304,7 +305,7 @@ class DeepSeekLLM(BaseLLM):
                 raise _OutputViolation("restore_menu", "invalid_semantics")
             if intent.dish_count is not None or intent.restore_constraints:
                 raise _OutputViolation("restore_menu", "invalid_semantics")
-            if intent.replace_slot is not None or intent.replace_name is not None:
+            if intent.replace_slot is not None or intent.replace_name is not None or intent.replace_slots or intent.keep_slots:
                 raise _OutputViolation("restore_menu", "invalid_semantics")
         for update in intent.diner_updates:
             if update.no_spicy is False:
@@ -348,14 +349,21 @@ class DeepSeekLLM(BaseLLM):
         if intent.action in {"replace", "explain"} and not state.menu_ids:
             raise _OutputViolation("action", "invalid_semantics")
         if intent.action == "replace":
-            if intent.replace_slot is None and not (
+            if not intent.replace_slots and intent.replace_slot is None and not (
                 intent.replace_name and intent.replace_name.strip()
             ):
                 raise _OutputViolation("replace_slot", "missing_field")
             if intent.replace_slot is not None and intent.replace_slot > len(state.menu_ids):
                 raise _OutputViolation("replace_slot", "out_of_range")
-        elif intent.replace_slot is not None or intent.replace_name is not None:
+            if (len(set(intent.replace_slots)) != len(intent.replace_slots)
+                    or any(s > len(state.menu_ids) for s in [*intent.replace_slots, *intent.keep_slots])
+                    or set(intent.replace_slots) & set(intent.keep_slots)
+                    or intent.replace_slots and (intent.replace_slot is not None or intent.replace_name is not None)):
+                raise _OutputViolation("replace_slots", "invalid_semantics")
+        elif intent.replace_slot is not None or intent.replace_name is not None or intent.replace_slots or intent.keep_slots:
             raise _OutputViolation("replace_slot", "invalid_semantics")
+        if intent.local_excluded_ingredients and not intent.replace_slots:
+            raise _OutputViolation("local_excluded_ingredients", "invalid_semantics")
         if intent.no_spicy is False and state.constraints.no_spicy:
             raise _OutputViolation("no_spicy", "invalid_semantics")
 

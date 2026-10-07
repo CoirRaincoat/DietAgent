@@ -56,11 +56,16 @@ from app.domain.scoped_methods import (
     scoped_method_mask,
     scoped_method_warnings,
 )
+from app.domain.slot_food_exclusions import slot_food_allowed
 from app.retrieval.keyword import recipe_relevance_score
 from app.rules.diet import diet_issue, diet_reasons
 from app.rules.engine import RuleDecision, RuleEngine, compact
 
 _DIVERSITY_POOL_LIMIT = 64
+
+
+class ScopedCandidateUnavailable(ValueError):
+    """No candidate in the authorized slot, not permission to edit others."""
 
 
 @dataclass
@@ -91,6 +96,7 @@ class MenuPlanner:
         A local edit may not shift another slot, even to satisfy new allocation.
         """
         count = constraints.dessert_count
+        edit_slots = set(options.get("_edit_slots") or ())
         main_count = constraints.dish_count - count
         if main_count < 1 or constraints.soup_count > main_count:
             return PlanResult(failure="总菜数包含汤和甜点，至少保留一道正餐；请确认菜数、汤数及甜点数。")
@@ -103,6 +109,9 @@ class MenuPlanner:
         if replace_slot is not None:
             rejected.add(current[replace_slot - 1].recipe_id)
             rejected_names.add(compact(current[replace_slot - 1].name))
+        for slot in edit_slots:
+            rejected.add(current[slot - 1].recipe_id)
+            rejected_names.add(compact(current[slot - 1].name))
         pool = []
         seen = set()
         decisions = {}
@@ -123,7 +132,8 @@ class MenuPlanner:
         for index in range(count):
             if desserts[index] is not None:
                 continue
-            choices = [r for r in pool if r not in desserts]
+            choices = [r for r in pool if r not in desserts
+                       and slot_food_allowed(r, main_count + index + 1, constraints, self.rules)]
             if not choices:
                 return PlanResult(failure="未找到足够符合已知限制的源配方甜点；不放宽过敏、不辣、素食、库存或数量要求。")
             desserts[index] = max(choices, key=lambda r: (
@@ -139,6 +149,8 @@ class MenuPlanner:
         })
         main_current = current[:main_count]
         main_options = dict(options)
+        if edit_slots:
+            main_options["_edit_slots"] = {slot for slot in edit_slots if slot <= main_count}
         if replace_slot is not None and replace_slot > main_count:
             # Editing a dessert is not permission to optimize the main dishes.
             main_options["recheck_soft_preferences"] = False
@@ -284,6 +296,7 @@ class MenuPlanner:
         experiment_initial_goal_frontier: bool = False,
         recent_recipe_names: Sequence[Sequence[str]] | None = None,
         allow_adjacent_rotation: bool = False,
+        _edit_slots: set[int] | None = None,
     ) -> PlanResult:
         current = current or []
         if constraints.dessert_count:
@@ -294,6 +307,7 @@ class MenuPlanner:
                 experiment_initial_goal_frontier=experiment_initial_goal_frontier,
                 recent_recipe_names=recent_recipe_names,
                 allow_adjacent_rotation=allow_adjacent_rotation,
+                _edit_slots=_edit_slots,
             )
         if issue := context_conflict_issue(constraints):
             return PlanResult(failure=issue)
@@ -317,6 +331,7 @@ class MenuPlanner:
         unresolved = self.rules.unresolved_allergies(constraints)
         if unresolved:
             return PlanResult(failure="暂未支持该过敏原的可靠映射，需要补充或审核：" + "、".join(unresolved))
+        mutable = set(_edit_slots or ())
         if replace_slot is not None:
             if replace_slot < 1 or replace_slot > len(current):
                 return PlanResult(failure="指定的换菜序号不存在，需要明确当前菜单中的目标菜品。")
@@ -324,6 +339,10 @@ class MenuPlanner:
                 return PlanResult(failure="指定换菜位置超出调整后的总菜数，请明确保留几道及要替换的位置。")
             rejected.add(current[replace_slot - 1].recipe_id)
             rejected_names.add(compact(current[replace_slot - 1].name))
+            mutable.add(replace_slot)
+        for slot in _edit_slots or ():
+            rejected.add(current[slot - 1].recipe_id)
+            rejected_names.add(compact(current[slot - 1].name))
 
         # The caller passes the full sorted catalog (or retries with it). Keep
         # current records available to preserve valid, unrelated slots.
@@ -353,8 +372,8 @@ class MenuPlanner:
                 f"无法组成总计 {count} 道（含 {soups} 道汤）的菜单。"
                 "已排除饮料、甜品、加工步骤、未拆分多菜套餐及未确认正餐角色的记录。"
             ))
-        if replace_slot is not None and any(
-            index != replace_slot - 1 and (
+        if mutable and any(
+            index + 1 not in mutable and (
                 not self._is_main_meal(recipe) or bool(diet_reasons(recipe, constraints))
                 or bool(flavor_exclusion_hits(recipe, constraints.preferences))
                 # A newly rejected hard-rule source in an unrelated slot is
@@ -418,7 +437,10 @@ class MenuPlanner:
             ranked = [
                 (recipe, balance_rank([*selected, recipe], count, constraints))
                 for recipe in pool if recipe.recipe_id not in selected_ids
+                and (slot is None or slot_food_allowed(recipe, slot, constraints, self.rules))
             ]
+            if not ranked:
+                raise ScopedCandidateUnavailable("指定菜位没有满足局部食材限制的替换候选；未修改其他菜。")
             # Keep role coverage first, then source meal context before health
             # and query ties. Meal labels are not hard nutritional guarantees.
             role_width = len(balance_rank([], count, constraints, roles_only=True))
@@ -548,7 +570,8 @@ class MenuPlanner:
 
         if composition_active(constraints):
             composition = plan_composition(list(allowed.values()), constraints, current,
-                                           choose=choose, replace_slot=replace_slot, choose_slot=choose)
+                                           choose=choose, replace_slot=replace_slot, choose_slot=choose,
+                                           edit_slots=_edit_slots)
             if composition.failure:
                 return PlanResult(failure=composition.failure)
             recipes = composition.recipes
@@ -566,6 +589,11 @@ class MenuPlanner:
                 used.add(chosen.recipe_id)
                 soups_needed -= int(wants_soup)
             recipes = [recipe for recipe in slots if recipe is not None]
+        if _edit_slots is not None:
+            # Atomic batch scaffold: the same hard screening, quotas and
+            # ranker fill ALL authorized holes before bounded local repairs.
+            # Do not let any whole-menu soft repair mutate a locked dish.
+            return PlanResult(recipes=recipes)
         # A named protein-food insertion also covers its raw ingredient. Do it
         # before broad ingredient coverage to avoid changing an unrelated slot
         # first and then changing a second slot for the same new preference.

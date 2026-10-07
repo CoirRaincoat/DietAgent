@@ -21,6 +21,7 @@ from app.domain.meal_context import infant_only_source
 from app.domain.meal_roles import is_dessert_recipe, is_main_meal_recipe, is_non_meal_role_exclusion
 from app.domain.menu_group_preferences import is_menu_group_preference, menu_group_matches
 from app.domain.models import Constraints, Recipe
+from app.domain.protein_food_names import declared_protein_foods
 from app.domain.source_preparation import grain_completion_issue
 from app.domain.source_soups import undrained_pot_reference
 from app.rules.diet import diet_reasons
@@ -206,6 +207,15 @@ class RuleEngine:
         """
         if is_menu_group_preference(value):
             return menu_group_matches(recipe, value)
+        if compact(value) in {"鱼", "鱼肉", "鱼类", "fish", "finfish"}:
+            # A wish to eat fish needs a whole declared fish ingredient. The
+            # separate allergy/exclusion resolver deliberately remains broad:
+            # fish stock/sauce or step-only fish can still be a safety concern.
+            # Do not let 蒸鱼豉油 in vegetables/rice pretend the meal has fish.
+            return list(dict.fromkeys(
+                ingredient.name for ingredient in recipe.ingredients
+                if "鱼" in declared_protein_foods(ingredient.name)
+            ))
         return self.food_matches(recipe, value)
 
     def _step_ingredients(self, text: str) -> set[str]:

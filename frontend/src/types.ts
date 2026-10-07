@@ -22,6 +22,7 @@ export interface MenuItem {
 export interface Constraints {
   allergies: string[]; excluded_ingredients: string[]; preferred_ingredients: string[]; inventory: string[] | null;
   preferences: string[]; health_goals: string[]; no_spicy: boolean; meal_type: string;
+  slot_food_exclusions?: Record<string, string[]>;
   dish_count: number; soup_count: number; people: number; max_minutes: number | null;
 }
 export interface Diner {
