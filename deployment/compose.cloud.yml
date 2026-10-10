@@ -1,0 +1,46 @@
+# Independent cloud project; never combine with the local demo Compose file.
+name: dietagent-cloud
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?Set the frozen backend image tag}
+    pull_policy: never
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set the model key in the private env file}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      ALLOW_RECIPE_GENERATION: "false"
+      LATENCY_DIAGNOSTICS_ENABLED: "false"
+      LOCAL_PROFILE_PATH: /local-input/profiles.json
+      SESSION_DB: /app/runtime/sessions.sqlite3
+    expose: ["8000"]
+    volumes:
+      - cloud_runtime:/app/runtime
+      - type: bind
+        source: ${LOCAL_PROFILE_HOST_PATH:?Set the absolute private profile JSON path}
+        target: /local-input/profiles.json
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  gateway:
+    image: ${GATEWAY_IMAGE:?Set the frozen gateway image tag}
+    pull_policy: never
+    environment:
+      PUBLIC_API_TOKEN: ${PUBLIC_API_TOKEN:?Set the independent 64-hex API token}
+      NGINX_ENVSUBST_FILTER: "^PUBLIC_API_TOKEN$$"
+    ports:
+      - "127.0.0.1:${CLOUD_LOCAL_PORT:-18080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  cloud_runtime:
+    name: ${CLOUD_RUNTIME_VOLUME:-dietagent_cloud_runtime}

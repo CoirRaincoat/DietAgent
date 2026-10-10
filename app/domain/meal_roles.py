@@ -79,11 +79,12 @@ _DESSERT_WORDS = (
     "甜甜圈",
     "达克瓦兹",
     "山楂糕",
+    "枣糕",
+    "阿胶糕",
     "甜汤",
     "甜羹",
     "奶冻",
     "茶冻",
-    "撞奶",
     "沙冰",
     "冰沙",
     "黑芝麻糕",
@@ -170,6 +171,32 @@ def preparation_only_steps(steps: str) -> bool:
     return preparation and execution is None
 
 
+def _finished_liquid_drink(name: str, steps: str, main_protein: bool) -> bool:
+    """A final liquid-to-cup serving action; never a prep vessel or soup."""
+    if main_protein or "汤" in name or "羹" in name or name.endswith(("饭", "面", "饼", "包", "粽")):
+        return False
+    final_step = re.split(r"第\s*\d+\s*步\s*[:：]", steps)[-1]
+    cup = re.search(r"液体[^。；;\n]{0,12}倒入[^。；;\n]{0,30}杯(?:子)?(?:中|里)?", final_step)
+    if cup is None:
+        return False
+    tail = final_step[cup.end():]
+    if re.search(r"备用|蒸|煮|炖|炒|烤|煎|炸|焖|凝固|成型|定型|结冻|装盘|入盘", tail):
+        return False
+    return bool(re.search(r"即可(?:食用|享用|饮用)", tail))
+
+
+def _finished_milk_drink(name: str, steps: str) -> bool:
+    """A named milk drink still needs final pouring, rather than later setting."""
+    if not name.endswith("撞奶") or name.endswith("姜撞奶"):
+        return False
+    final_step = re.split(r"第\s*\d+\s*步\s*[:：]", steps)[-1]
+    actions = list(re.finditer(r"倒入牛奶|倒入杯(?:子)?|装(?:入)?杯|装入杯子", final_step))
+    if not actions:
+        return False
+    tail = final_step[actions[-1].end():]
+    return not re.search(r"凝固|成型|定型|结冻|备用|蒸|烤", tail)
+
+
 def non_meal_roles(
     name: str, ingredient_names: Iterable[str], steps: str, labels: Iterable[str]
 ) -> list[str]:
@@ -180,9 +207,22 @@ def non_meal_roles(
     preparation evidence; arbitrary ``水``/``汁``/``糕`` substrings are not bans.
     """
     name = culinary_title_without_zero_soup_metadata(name)
-    foods = " ".join(ingredient_names)
+    declared_foods = list(ingredient_names)
+    foods = " ".join(declared_foods)
     steps = "".join(steps.split())
     roles: list[str] = []
+    sauce_accompaniment = re.search(r"(?<!自)(?<!调)配(?!料)|佐(?!料)", name)
+    # A declared cooked body served with dipping soy sauce is a finished dish,
+    # while a bare sauce or a self-prepared sauce still cannot fill a meal slot.
+    dipping_finished_body = (
+        name.endswith("蘸酱") and name.removesuffix("蘸酱") in declared_foods
+        and re.search(r"(?:蒸熟|煮熟|烤熟|炒熟|煎熟)[^。；;]{0,20}蘸酱油[^。；;]{0,12}食用", steps)
+    )
+    standalone_sauce = (
+        name.endswith(("烧烤酱", "蘸酱", "调味酱", "花生酱", "芝麻酱"))
+        and not sauce_accompaniment and not dipping_finished_body
+    )
+    milk_drink = _finished_milk_drink(name, steps)
     concentrate = (
         name.endswith(("蜜", "浓缩液", "果浆"))
         and "饮用" in steps
@@ -197,6 +237,7 @@ def non_meal_roles(
         or name.endswith(("果酱", "辣椒酱", "番茄酱", "秋梨膏", "草莓酱", "蓝莓酱", "拌饭酱"))
         or concentrate
         or intermediate_use
+        or standalone_sauce
         or meat_floss_component(foods.split(" "), steps)
         or slot_component_evidence(name, steps) is not None
     ):
@@ -229,7 +270,7 @@ def non_meal_roles(
         and any(action in steps for action in ("模具", "压制成型"))
         and not savory
     )
-    if (
+    if not milk_drink and (
         any(
             word in name and not (word == "饼干" and crumb_coated_entree(foods.split(" "), steps))
             for word in _DESSERT_WORDS
@@ -242,6 +283,7 @@ def non_meal_roles(
         or sweet_balls
         or molded_yam
         or preparation_dessert_evidence(foods.split(" "), steps)
+        or name.endswith("撞奶")
     ):
         roles.append("dessert")
     beverage = (
@@ -290,6 +332,11 @@ def non_meal_roles(
         or plant_water
         or processed_fruit_drink
         or plum_drink
+        or milk_drink
+        or _finished_liquid_drink(
+            name, steps,
+            meat or any(term in foods for term in ("豆腐", "鸡蛋", "鸭蛋", "鹅蛋", "鹌鹑蛋")),
+        )
     ):
         roles.append("drink")
     return roles

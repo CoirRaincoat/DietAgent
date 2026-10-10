@@ -128,7 +128,10 @@ def resolve_agent_request(
     user_id = _one_value(
         [("user", body_user), ("context.user_id", context_user), ("X-User-ID", header_user)],
         required=True,
-        missing_message="缺少用户标识；请提供 user、context.user_id 或 X-User-ID。",
+        missing_message=(
+            "缺少用户标识；请提供已获授权且目标目录中存在的ID：user为正整数ID字符串，"
+            "或使用JSON正整数context.user_id、ASCII正整数X-User-ID。参见 /api-guide。"
+        ),
     )
 
     context_session = request.context.session_id if request.context else None
@@ -178,15 +181,48 @@ def server_timing(result: ChatResult) -> str:
     return ", ".join(metrics)
 
 
-def assistant_text(result: ChatResult) -> str:
-    """Render verified menu facts independently of optional explanation selection."""
+def _invalid_menu_result() -> OpenAIRequestError:
+    return OpenAIRequestError(
+        500, "本轮菜单的输出数据不完整或不一致，无法生成回答。",
+        "invalid_menu_result", error_type="server_error",
+    )
+
+
+def _final_recipe_summary(result: ChatResult) -> list[dict[str, str]]:
+    """Use current verified items only; historical/suggested items are never output."""
+    if result.status in {"clarification_required", "no_feasible_menu"}:
+        return []
     if result.status != "ok" or not result.conversation_state.menu_valid or not result.menu:
-        return result.reason
-    dishes = [
-        f"{item.slot}. {item.name}（菜谱ID：{item.recipe_id}；来源：{item.source}）"
-        for item in result.menu
-    ]
-    return "本餐菜单：\n" + "\n".join(dishes) + "\n\n" + result.reason
+        raise _invalid_menu_result()
+    summary = []
+    for item in result.menu:
+        recipe_id, name = getattr(item, "recipe_id", None), getattr(item, "name", None)
+        if not all(isinstance(value, str) and value.strip() for value in (recipe_id, name)):
+            raise _invalid_menu_result()
+        summary.append({"recipe_id": recipe_id, "name": name})
+    if [item["recipe_id"] for item in summary] != result.conversation_state.menu_ids:
+        raise _invalid_menu_result()
+    return summary
+
+
+def assistant_text(result: ChatResult) -> str:
+    """Render one deterministic compatibility answer without changing domain state."""
+    summary = _final_recipe_summary(result)
+    if summary:
+        dishes = [
+            f"{item.slot}. {item.name}（菜谱ID：{item.recipe_id}；来源：{item.source}）"
+            for item in result.menu
+        ]
+        body = "本餐菜单：\n" + "\n".join(dishes) + "\n\n" + result.reason
+    else:
+        body = result.reason + "\n本次未返回菜单。"
+    payload = json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+    text = body + "\n\n【菜谱JSON】\n```json\n" + payload + "\n```"
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _invalid_menu_result() from None
+    return text
 
 
 def completion_body(result: ChatResult, completion_id: str, created: int) -> dict:
@@ -208,9 +244,14 @@ def completion_body(result: ChatResult, completion_id: str, created: int) -> dic
 
 
 def stream_events(result: ChatResult, completion_id: str, created: int) -> Iterator[str]:
-    """Yield standards-compatible SSE records from an already verified result."""
+    """Validate/render eagerly so presentation errors precede successful SSE headers."""
+    return _stream_text_events(assistant_text(result), completion_id, created)
+
+
+def _stream_text_events(text: str, completion_id: str, created: int) -> Iterator[str]:
+    """Keep the existing chunk/termination protocol; interruptions never add output."""
     yield _sse(_chunk(completion_id, created, {"role": "assistant", "content": ""}))
-    for content in _text_chunks(assistant_text(result)):
+    for content in _text_chunks(text):
         yield _sse(_chunk(completion_id, created, {"content": content}))
     yield _sse(_chunk(completion_id, created, {}, finish_reason="stop"))
     yield "data: [DONE]\n\n"
@@ -268,7 +309,11 @@ def _one_value(
     unique = {value for _, value in present}
     if len(unique) > 1:
         names = "、".join(name for name, _ in present)
-        raise OpenAIRequestError(409, f"多个入口提供了不一致的值：{names}。", "identity_conflict")
+        raise OpenAIRequestError(
+            409, f"多个入口提供了不一致的值：{names}。请统一重复位置的值，"
+            "或删除冲突的重复位置；不得更换用户绕过会话绑定。参见 /api-guide。",
+            "identity_conflict",
+        )
     if not present:
         if required:
             raise OpenAIRequestError(422, missing_message, "missing_user", "user")
@@ -280,7 +325,10 @@ def _positive_int(value: str | None, field: str) -> int | None:
     if value is None:
         return None
     if not value.isascii() or not value.isdigit() or int(value) < 1:
-        raise OpenAIRequestError(422, f"{field} 必须是正整数。", "invalid_user", field)
+        raise OpenAIRequestError(
+            422, f"{field} 必须是ASCII正整数，并对应已获授权且存在的用户ID。"
+            "参见 /api-guide。", "invalid_user", field,
+        )
     return int(value)
 
 
@@ -289,7 +337,8 @@ def _session_id(value: str | None, field: str) -> str | None:
         return None
     if len(value) != 32 or any(character not in "0123456789abcdef" for character in value):
         raise OpenAIRequestError(
-            422, f"{field} 必须是32位小写十六进制会话ID。", "invalid_session", field
+            422, f"{field} 必须是32位小写十六进制会话ID；首轮可省略，"
+            "续轮使用原响应X-Session-ID。参见 /api-guide。", "invalid_session", field
         )
     return value
 
@@ -299,6 +348,7 @@ def _request_id(value: str | None, field: str) -> str | None:
         return None
     if not 1 <= len(value) <= 128:
         raise OpenAIRequestError(
-            422, f"{field} 长度必须为1到128字符。", "invalid_request_id", field
+            422, f"{field} 长度必须为1到128字符；可省略，新操作使用新值。"
+            "参见 /api-guide。", "invalid_request_id", field
         )
     return value

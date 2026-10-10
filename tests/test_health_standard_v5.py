@@ -3,6 +3,8 @@
 These are authored policy/engineering tests, not clinical or human labels.
 """
 
+import json
+
 import pytest
 
 from app.agent.meal_structure import repair_shared_soup_entree
@@ -235,4 +237,9 @@ def test_unavailable_vegan_tofu_is_disclosed_on_native_compat_and_sse(tmp_path, 
         )
     else:
         content = compat.json()["choices"][0]["message"]["content"]
-    assert content.endswith(native["reason"])
+    body, marker, payload = content.rpartition("\n\n【菜谱JSON】\n```json\n")
+    assert marker and content.count(marker) == 1 and payload.endswith("\n```")
+    assert body.endswith(native["reason"])
+    assert json.loads(payload[:-4]) == [
+        {"recipe_id": item["recipe_id"], "name": item["name"]} for item in native["menu"]
+    ]

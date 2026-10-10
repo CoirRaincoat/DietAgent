@@ -122,6 +122,7 @@ from app.domain.scoped_methods import (
 )
 from app.domain.slot_food_exclusions import scoped_food_menu_issue, slot_food_allowed
 from app.infrastructure.data import DataCatalog
+from app.infrastructure.diagnostics import timed, timed_lock
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.sessions import SessionStore
 from app.retrieval.core import RecipeRetriever
@@ -192,12 +193,14 @@ class MealAgent:
             if self.experiment_cross_meal_rotation
             else self._locks.setdefault(session_id, asyncio.Lock())
         )
-        async with lock:
-            state = self.store.get(session_id, user_id)
+        async with timed_lock(lock):
+            with timed("state_read"):
+                state = self.store.get(session_id, user_id)
             if state is None and supplied_session:
                 raise UnknownSession("会话不存在；首次请求请省略 session_id。")
             if state and request_id:
-                cached = self.store.replay(session_id, request_id, request_hash, state.revision)
+                with timed("replay_read"):
+                    cached = self.store.replay(session_id, request_id, request_hash, state.revision)
                 if cached:
                     return cached
             profile = self.catalog.profiles[user_id]
@@ -524,7 +527,8 @@ class MealAgent:
             state.pending_clarification = issue
             state.history = (state.history + [{"role": "user", "content": message}])[-12:]
             # Valid new restrictions survive planning failures and process restarts.
-            self.store.save(state, expected_revision)
+            with timed("state_save"):
+                self.store.save(state, expected_revision)
             events: list[ToolEvent] = []
             if issue:
                 result = self._unresolved(
@@ -545,10 +549,11 @@ class MealAgent:
             receipt = state.last_recommendation if (
                 self.experiment_cross_meal_rotation and result.status == "ok"
             ) else None
-            self.store.complete(
-                result, state.revision, request_id, request_hash, recommendation=receipt,
-                expected_history_revision=state._recommendation_history_revision if receipt else None,
-            )
+            with timed("result_commit"):
+                self.store.complete(
+                    result, state.revision, request_id, request_hash, recommendation=receipt,
+                    expected_history_revision=state._recommendation_history_revision if receipt else None,
+                )
             return result
 
     def _apply_intent(self, state: SessionState, intent: Intent, message: str,
@@ -885,6 +890,10 @@ class MealAgent:
         )
         if (intent.action == "clarify" or intent.clarification) and not resume_plan:
             return intent.clarification or "请补充本餐需要调整的具体要求。"
+        # Missing history can be explained without confirming meal defaults or
+        # mutating a menu. Valid history still waits for complete meal context.
+        if intent.restore_menu is not None and not state.menu_history:
+            return apply_menu_restore(state, intent, self.rules, self.catalog.recipes)
         questions = missing_questions(state)
         if questions:
             if context_questions is not None:

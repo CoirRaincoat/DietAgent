@@ -18,3 +18,8 @@ tests/
 
 frontend/
 node_modules/
+
+# Private local dialogue annotations and judge runs are not runtime inputs.
+evaluation/dialogues.json
+DietAgent_judge_eval/
+judge-results/

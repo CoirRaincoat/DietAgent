@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-flash"
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    latency_diagnostics_enabled: bool = False
     # Paid proposal calls require deliberate deployment opt-in, never inferred
     # from merely having a parser key. Existing default uses the local fallback.
     allow_recipe_generation: bool = False

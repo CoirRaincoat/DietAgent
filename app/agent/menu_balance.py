@@ -4,10 +4,11 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Literal
 
 from app.agent.meal_structure import minimum_role_counts
-from app.domain.cooking_methods import cooking_method_evidence, main_cooking_methods
+from app.domain.cooking_methods import main_cooking_methods
 from app.domain.entree_preferences import mixed_entree_active, mixed_entree_coverage
 from app.domain.models import Constraints, Recipe
 
@@ -52,7 +53,17 @@ def serving_temperature(recipe: Recipe) -> str:
     include hot dressing preparation; cooling a filling or refrigerating a
     marinade does not by itself establish the finished dish's temperature.
     """
-    steps = recipe.steps
+    return _serving_temperature(recipe.name, recipe.steps, tuple(recipe.methods))
+
+
+@lru_cache(maxsize=4096)
+def _serving_temperature(name: str, steps: str, methods: tuple[str, ...]) -> str:
+    """Reuse only immutable source fields; changed records produce fresh keys.
+
+    No recipe object, user, constraint, rule verdict or menu is retained. The
+    bound permits the current catalog and source revisions without unbounded
+    growth; eviction changes cost only, never the serving evidence rules.
+    """
     if re.search(
         r"(?:趁热(?:食用|享用)?|热食|热吃)[^。；;\n]{0,16}(?:或|也可)"
         r"[^。；;\n]{0,16}(?:放凉|晾凉|冷藏|冷食|冷吃)", steps
@@ -72,12 +83,12 @@ def serving_temperature(recipe: Recipe) -> str:
 
     # The dish name describes the finished dish, unlike a later hot oil/sauce
     # step. Explicit serving-temperature instructions above take precedence.
-    if any(marker in recipe.name for marker in COLD_DISH_MARKERS):
+    if any(marker in name for marker in COLD_DISH_MARKERS):
         return "cold"
 
     actions = [
         match for match in _TEMPERATURE_ACTION.finditer(steps)
-        if match.group() != "开始烹饪" or HOT_METHODS & set(cooking_method_evidence(recipe).executed_methods)
+        if match.group() != "开始烹饪" or HOT_METHODS & set(methods)
     ]
     if actions:
         last = actions[-1]
@@ -94,7 +105,7 @@ def serving_temperature(recipe: Recipe) -> str:
         ):
             return "cold"
         return "unknown"
-    if re.search(_HEATING_ACTION, recipe.name):
+    if re.search(_HEATING_ACTION, name):
         return "hot"
     return "unknown"
 
@@ -165,7 +176,8 @@ def analyze_menu_balance(recipes: Sequence[Recipe], constraints: Constraints | N
         for category in set(recipe.categories)
         if category in CATEGORY_KEYS
     )
-    method_counts = Counter(method for recipe in recipes for method in main_cooking_methods(recipe))
+    # Count each verified finishing method once, preserving its source order.
+    method_counts = Counter(method for recipe in recipes for method in dict.fromkeys(main_cooking_methods(recipe)))
     temperature_counts = Counter(serving_temperature(recipe) for recipe in recipes)
     categories = {key: category_counts[key] for key in CATEGORY_KEYS}
     temperatures = {

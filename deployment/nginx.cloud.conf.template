@@ -1,0 +1,54 @@
+# A 64-hex token plus the Bearer prefix exceeds the default hash bucket.
+map_hash_bucket_size 128;
+map $http_authorization $api_authorized {
+    default 0;
+    "Bearer ${PUBLIC_API_TOKEN}" 1;
+}
+limit_req_zone $binary_remote_addr zone=api_rate:10m rate=10r/s;
+# Do not log request bodies, query strings, tokens or profile fields.
+log_format delivery '$remote_addr $request_method $uri $status $request_time';
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+    client_max_body_size 64k;
+    access_log /dev/stdout delivery;
+    proxy_http_version 1.1;
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_buffering off;
+    proxy_cache off;
+    location = / {
+        default_type text/plain;
+        return 200 "DietAgent ZX-2026-0301 API service. See /docs. This endpoint is not the local demo UI.\n";
+    }
+    location ~ ^/(health|docs|redoc|openapi\.json)(/|$) {
+        proxy_pass http://backend:8000;
+    }
+    location = /api-guide {
+        default_type application/json;
+        if ($request_method !~ ^(GET|HEAD)$) {
+            add_header Allow "GET, HEAD" always;
+            return 405 '{"error":{"message":"Use GET or HEAD for /api-guide.","type":"invalid_request_error","param":"method","code":"method_not_allowed"}}';
+        }
+        proxy_pass http://backend:8000;
+    }
+    location ~ ^/(chat|v1/chat/completions|api/chat)$ {
+        default_type application/json;
+        if ($api_authorized = 0) {
+            return 401 '{"error":{"message":"API token required; provide the project access token in Authorization: Bearer. See /api-guide.","type":"authentication_error","param":"Authorization","code":"unauthorized"}}';
+        }
+        limit_req zone=api_rate burst=20 nodelay;
+        limit_req_status 429;
+        rewrite ^/api/chat$ /chat break;
+        proxy_pass http://backend:8000;
+    }
+    location / {
+        return 404;
+    }
+}

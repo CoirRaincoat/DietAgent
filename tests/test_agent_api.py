@@ -4,7 +4,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
-from app.domain.models import DinerUpdate, Ingredient, Intent, Recipe, UserProfile
+from app.api.openai_compat import ChatCompletionsRequest, OpenAIRequestError
+from app.domain.models import (
+    ChatResult,
+    DinerUpdate,
+    Ingredient,
+    Intent,
+    MenuItem,
+    Recipe,
+    SessionState,
+    UserProfile,
+)
 from app.infrastructure.data import DataCatalog
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.sessions import SessionStore
@@ -643,6 +653,36 @@ def parse_sse(body):
     return [json.loads(record.removeprefix("data: ")) for record in records[:-1]]
 
 
+def compatibility_content(response):
+    if response.headers["content-type"].startswith("text/event-stream"):
+        return "".join(chunk["choices"][0]["delta"].get("content", "")
+                       for chunk in parse_sse(response.text))
+    return response.json()["choices"][0]["message"]["content"]
+
+
+def final_recipe_json(content):
+    _, marker, suffix = content.rpartition("\n\n【菜谱JSON】\n```json\n")
+    assert marker and suffix.endswith("\n```")
+    summary = json.loads(suffix[:-4])
+    assert isinstance(summary, list)
+    assert all(list(item) == ["recipe_id", "name"] for item in summary)
+    return summary
+
+
+def capture_chat_results(client, monkeypatch):
+    """Observe actual current results without another HTTP request or planning pass."""
+    original = client.app.state.agent.chat
+    results = []
+
+    async def capture(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        results.append(result.model_copy(deep=True))
+        return result
+
+    monkeypatch.setattr(client.app.state.agent, "chat", capture)
+    return results
+
+
 def test_openai_nonstreaming_response_and_session_headers(tmp_path, catalog):
     with client_for(tmp_path, catalog, ScriptedLLM()) as client:
         response = client.post("/v1/chat/completions", json=openai_payload())
@@ -807,7 +847,10 @@ def test_openai_renders_every_verified_dish_with_minimal_selected_facts(tmp_path
     for dish in expected["menu"]:
         assert f'{dish["slot"]}. {dish["name"]}' in content
         assert dish["recipe_id"] in content
-    assert content.endswith(expected["reason"])
+    assert content.rpartition("\n\n【菜谱JSON】\n```json\n")[0].endswith(expected["reason"])
+    assert final_recipe_json(content) == [
+        {"recipe_id": dish["recipe_id"], "name": dish["name"]} for dish in expected["menu"]
+    ]
     assert llm.parse_calls == 2
 
 
@@ -828,3 +871,386 @@ def test_openai_clarification_does_not_render_previous_menu(tmp_path, catalog, s
     )
     assert "本餐菜单：" not in content
     assert all(dish["name"] not in content for dish in first["menu"])
+    assert "本次未返回菜单。" in content
+    assert final_recipe_json(content) == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_json_follows_a_real_second_turn_exclusion(
+    tmp_path, catalog, monkeypatch, stream,
+):
+    llm = ScriptedLLM([
+        complete_intent(preferred_ingredients=["鸡胸肉"]),
+        Intent(excluded_ingredients=["鸡胸肉"]),
+    ])
+    with client_for(tmp_path, catalog, llm) as client:
+        results = capture_chat_results(client, monkeypatch)
+        first = client.post("/v1/chat/completions", json=openai_payload(
+            stream=stream,
+            messages=[{"role": "user", "content": "1人晚餐，没有其他忌口，想吃鸡胸肉"}],
+        ))
+        sid = first.headers["x-session-id"]
+        second_payload = openai_payload(
+            stream=stream, messages=[{"role": "user", "content": "不要鸡胸肉，其他要求不变"}],
+        )
+        second = client.post("/v1/chat/completions", headers={"X-Session-ID": sid},
+                             json=second_payload)
+    assert first.status_code == second.status_code == 200
+    assert len(second_payload["messages"]) == 1 and second.headers["x-session-id"] == sid
+    assert results[0].status == results[1].status == "ok"
+    assert any("鸡胸肉" in item.ingredients for item in results[0].menu)
+    assert all("鸡胸肉" not in item.ingredients for item in results[1].menu)
+    assert "鸡胸肉" in results[1].conversation_state.constraints.excluded_ingredients
+    old_ids = {item.recipe_id for item in results[0].menu if "鸡胸肉" in item.ingredients}
+    assert old_ids.isdisjoint(item.recipe_id for item in results[1].menu)
+    for response, current in zip((first, second), results, strict=True):
+        assert final_recipe_json(compatibility_content(response)) == [
+            {"recipe_id": item.recipe_id, "name": item.name} for item in current.menu
+        ]
+    assert results[1].conversation_state.revision == results[0].conversation_state.revision + 1
+    assert llm.parse_calls == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_json_retains_a_current_reverified_menu(tmp_path, catalog, monkeypatch, stream):
+    llm = ScriptedLLM([complete_intent(), Intent(action="explain")])
+    with client_for(tmp_path, catalog, llm) as client:
+        results = capture_chat_results(client, monkeypatch)
+        first = client.post("/v1/chat/completions", json=openai_payload(stream=stream))
+        second = client.post("/v1/chat/completions", headers={
+            "X-Session-ID": first.headers["x-session-id"],
+        }, json=openai_payload(stream=stream, messages=[{"role": "user", "content": "继续"}]))
+    assert first.status_code == second.status_code == 200
+    assert results[1].status == "ok" and results[1].conversation_state.menu_valid
+    expected = [{"recipe_id": item.recipe_id, "name": item.name} for item in results[1].menu]
+    assert expected and final_recipe_json(compatibility_content(second)) == expected
+    assert expected == final_recipe_json(compatibility_content(first))
+    assert "本轮保留原菜单" in compatibility_content(second)
+    assert "本次未返回菜单。" not in compatibility_content(second)
+    assert llm.parse_calls == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_json_no_feasible_response_preserves_reason(tmp_path, catalog, stream):
+    llm = ScriptedLLM([complete_intent(inventory=[])])
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", json=openai_payload(
+            stream=stream, messages=[{"role": "user", "content": "1人晚餐，无其他忌口，没有食材"}],
+        ))
+    assert response.status_code == 200
+    content = compatibility_content(response)
+    assert "本次未返回菜单。" in content and final_recipe_json(content) == []
+    assert content.rpartition("\n\n【菜谱JSON】\n```json\n")[0] != "本次未返回菜单。"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_json_history_is_not_a_current_menu(tmp_path, catalog, monkeypatch, stream):
+    llm = ScriptedLLM([complete_intent(), Intent(max_minutes=1)])
+    with client_for(tmp_path, catalog, llm) as client:
+        results = capture_chat_results(client, monkeypatch)
+        first = client.post("/v1/chat/completions", json=openai_payload(stream=stream))
+        second = client.post("/v1/chat/completions", headers={
+            "X-Session-ID": first.headers["x-session-id"],
+        }, json=openai_payload(stream=stream, messages=[{"role": "user", "content": "要求一分钟内做好"}]))
+    assert first.status_code == second.status_code == 200
+    assert results[1].status == "clarification_required" and results[1].menu == []
+    assert results[1].conversation_state.menu_ids == results[0].conversation_state.menu_ids
+    assert results[1].conversation_state.menu_history
+    content = compatibility_content(second)
+    assert results[1].reason in content
+    assert "本次未返回菜单。" in content and final_recipe_json(content) == []
+    assert llm.parse_calls == 2
+
+
+@pytest.mark.parametrize("first_stream", [False, True])
+def test_openai_json_replay_across_formats_and_conflict_errors(tmp_path, catalog, first_stream):
+    llm = ScriptedLLM([complete_intent(), Intent(action="explain")])
+    payload = openai_payload(stream=first_stream, request_id="json-replay")
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", json=payload)
+        sid = first.headers["x-session-id"]
+        replay_payload = {**payload, "stream": not first_stream, "session_id": sid}
+        replay = client.post("/v1/chat/completions", json=replay_payload)
+        assert first.status_code == replay.status_code == 200
+        assert compatibility_content(first) == compatibility_content(replay)
+        assert compatibility_content(replay).count("\n\n【菜谱JSON】\n```json\n") == 1
+        assert final_recipe_json(compatibility_content(replay))
+        assert llm.parse_calls == 1
+        conflict = client.post("/v1/chat/completions", json={
+            **replay_payload, "messages": [{"role": "user", "content": "不同消息"}],
+        })
+        advanced = client.post("/v1/chat/completions", json={
+            **replay_payload, "request_id": "json-new-turn",
+            "messages": [{"role": "user", "content": "继续"}],
+        })
+        assert advanced.status_code == 200
+        expired = client.post("/v1/chat/completions", json=replay_payload)
+    for error in (conflict, expired):
+        assert error.status_code == 409 and error.json()["error"]["code"] == "session_conflict"
+        assert set(error.json()) == {"error"} and "【菜谱JSON】" not in error.text
+        assert not error.headers["content-type"].startswith("text/event-stream")
+    assert llm.parse_calls == 2
+
+
+def test_openai_json_does_not_change_native_chat_or_repeat_tools(tmp_path, catalog, monkeypatch):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        native_request = {"user_id": 3, "message": "1人晚餐，没有其他忌口", "request_id": "native-json"}
+        native = client.post("/chat", json=native_request).json()
+        sid = native["conversation_state"]["session_id"]
+
+        def unexpected_work(*args, **kwargs):
+            raise AssertionError("Rendering/replaying a completed result must not invoke tools")
+
+        monkeypatch.setattr(client.app.state.agent.tools, "call", unexpected_work)
+        rendered = client.post("/v1/chat/completions", json=openai_payload(
+            session_id=sid, request_id="native-json",
+        ))
+        native_replay = client.post("/chat", json={**native_request, "session_id": sid}).json()
+    assert native["schema_version"] == "2.0" and native["status"] == "ok"
+    assert native == native_replay
+    assert "【菜谱JSON】" not in native["reason"]
+    assert final_recipe_json(compatibility_content(rendered)) == [
+        {"recipe_id": item["recipe_id"], "name": item["name"]} for item in native["menu"]
+    ]
+    assert llm.parse_calls == 1
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("field,bad_value", [
+    ("recipe_id", None), ("recipe_id", ""), ("name", 123), ("name", "\ud800"),
+])
+def test_openai_invalid_final_data_uses_json_error_before_sse(
+    tmp_path, catalog, monkeypatch, stream, field, bad_value,
+):
+    result = ChatResult(
+        status="ok", reason="合成说明。",
+        menu=[MenuItem(slot=1, recipe_id="synthetic_http", name="合成菜", ingredients=[], steps="")],
+        conversation_state=SessionState(
+            session_id="b" * 32, user_id=3, menu_ids=["synthetic_http"], menu_valid=True,
+        ),
+    )
+    result.menu[0] = result.menu[0].model_copy(update={field: bad_value})
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        async def invalid_result(**kwargs):
+            return result
+
+        monkeypatch.setattr(client.app.state.agent, "chat", invalid_result)
+        response = client.post("/v1/chat/completions", json=openai_payload(stream=stream))
+    assert response.status_code == 500
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"error": {
+        "message": "本轮菜单的输出数据不完整或不一致，无法生成回答。",
+        "type": "server_error", "param": None, "code": "invalid_menu_result",
+    }}
+    assert "【菜谱JSON】" not in response.text and "[DONE]" not in response.text
+    assert llm.parse_calls == 0
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("payload_changes,headers,status,code", [
+    ({"user": None}, {}, 422, "missing_user"),
+    ({"user": 3}, {}, 422, "invalid_request"),
+    ({"context": {"user_id": "3"}}, {}, 422, "invalid_request"),
+    ({"context": {"user_id": 4}}, {}, 409, "identity_conflict"),
+    ({}, {"X-User-ID": "4"}, 409, "identity_conflict"),
+    ({"session_id": "a" * 32}, {"X-Session-ID": "b" * 32}, 409, "identity_conflict"),
+    ({"request_id": "first"}, {"X-Client-Request-Id": "second"}, 409, "identity_conflict"),
+    ({"user": "999999"}, {}, 404, "not_found"),
+    ({"session_id": "f" * 32}, {}, 404, "not_found"),
+])
+def test_openai_request_errors_never_get_a_success_tail(
+    tmp_path, catalog, stream, payload_changes, headers, status, code,
+):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", headers=headers,
+                               json=openai_payload(stream=stream, **payload_changes))
+    assert response.status_code == status and response.json()["error"]["code"] == code
+    assert set(response.json()["error"]) == {"message", "type", "param", "code"}
+    assert "【菜谱JSON】" not in response.text and "[DONE]" not in response.text
+    assert llm.parse_calls == 0
+
+
+@pytest.mark.parametrize("body_changes,headers", [
+    ({"user": None, "context": {"user_id": 3}}, {}),
+    ({"user": None}, {"X-User-ID": "3"}),
+    ({"context": {"user_id": 3}}, {"X-User-ID": "03"}),
+])
+def test_openai_supported_user_sources_keep_existing_types_and_matching_rules(
+    tmp_path, catalog, body_changes, headers,
+):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", headers=headers,
+                               json=openai_payload(**body_changes))
+    assert response.status_code == 200 and final_recipe_json(compatibility_content(response))
+    assert llm.parse_calls == 1
+
+
+@pytest.mark.parametrize("session_source", ["session_id", "context", "header", "all"])
+def test_openai_supported_session_sources_do_not_require_resending_history(
+    tmp_path, catalog, session_source,
+):
+    llm = ScriptedLLM([complete_intent(), Intent(action="explain")])
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", json=openai_payload())
+        sid = first.headers["x-session-id"]
+        body, headers = {}, {}
+        if session_source in {"session_id", "all"}:
+            body["session_id"] = sid
+        if session_source in {"context", "all"}:
+            body["context"] = {"session_id": sid}
+        if session_source in {"header", "all"}:
+            headers["X-Session-ID"] = sid
+        second = client.post("/v1/chat/completions", headers=headers, json=openai_payload(
+            **body, messages=[{"role": "user", "content": "继续"}],
+        ))
+        wrong_user = client.post("/v1/chat/completions", headers={"X-Session-ID": sid},
+                                 json=openai_payload(user="4", stream=True))
+    assert second.status_code == 200 and second.headers["x-session-id"] == sid
+    assert final_recipe_json(compatibility_content(second)) == final_recipe_json(
+        compatibility_content(first)
+    )
+    assert wrong_user.status_code == 409 and wrong_user.json()["error"]["code"] == "session_conflict"
+    assert "【菜谱JSON】" not in wrong_user.text and llm.parse_calls == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("status,code,error_type", [
+    (401, "unauthorized", "invalid_request_error"),
+    (403, "original_profile_blocked", "permission_error"),
+    (429, "rate_limit_exceeded", "rate_limit_error"),
+])
+def test_openai_existing_error_handler_preserves_status_without_a_success_tail(
+    tmp_path, catalog, monkeypatch, stream, status, code, error_type,
+):
+    # Synthetic raised errors exercise the backend boundary. This is not a live
+    # gateway-auth test; actual Bearer verification remains solely in the gateway.
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        async def rejected(**kwargs):
+            raise OpenAIRequestError(status, "合成错误说明", code, error_type=error_type)
+
+        monkeypatch.setattr(client.app.state.agent, "chat", rejected)
+        response = client.post("/v1/chat/completions", json=openai_payload(stream=stream))
+    assert response.status_code == status
+    assert response.json() == {"error": {
+        "message": "合成错误说明", "type": error_type, "param": None, "code": code,
+    }}
+    assert response.headers["content-type"].startswith("application/json")
+    assert "【菜谱JSON】" not in response.text and "[DONE]" not in response.text
+    assert llm.parse_calls == 0
+
+
+@pytest.mark.parametrize("stream", [None, False, True], ids=["omitted", "false", "true"])
+def test_submitted_minimal_request_and_actual_second_turn(tmp_path, catalog, stream):
+    llm = ScriptedLLM([complete_intent(), Intent(action="replace", replace_slot=2)])
+    payload = {
+        "model": "fangtai-meal-agent", "user": "3",
+        "messages": [{"role": "user", "content": "1人晚餐，没有其他忌口"}],
+    }
+    if stream is not None:
+        payload["stream"] = stream
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", json=payload)
+        assert first.status_code == 200
+        sid = first.headers["x-session-id"]
+        second = client.post("/v1/chat/completions", headers={"X-Session-ID": sid}, json={
+            **payload, "messages": [{"role": "user", "content": "只换第二道菜"}],
+        })
+        assert second.status_code == 200
+    assert second.headers["x-session-id"] == sid and llm.parse_calls == 2
+    old = final_recipe_json(compatibility_content(first))
+    new = final_recipe_json(compatibility_content(second))
+    assert old[0] == new[0] and old[2] == new[2] and old[1] != new[1]
+    assert "/api-guide" not in compatibility_content(second)
+    expected_type = "text/event-stream" if stream else "application/json"
+    assert first.headers["content-type"].startswith(expected_type)
+    if stream:
+        assert second.text.count("data: [DONE]") == 1
+        assert parse_sse(second.text)[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_required_schema_and_nullable_extensions_keep_identity_contract(tmp_path, catalog):
+    schema = ChatCompletionsRequest.model_json_schema()
+    assert schema["required"] == ["model", "messages"]
+    assert schema["$defs"]["OpenAIMessage"]["required"] == ["role", "content"]
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", headers={"X-User-ID": "3"}, json={
+            "model": "fangtai-meal-agent",
+            "messages": [{"role": "user", "content": "1人晚餐，没有其他忌口"}],
+            "user": None, "context": None, "session_id": None, "request_id": None,
+            "stream_options": None,
+        })
+    assert response.status_code == 200 and final_recipe_json(compatibility_content(response))
+    assert llm.parse_calls == 1
+
+
+@pytest.mark.parametrize("changes,removed,parameter,code,hint", [
+    ({}, "model", "model", "invalid_request", "fangtai-meal-agent"),
+    ({}, "messages", "messages", "invalid_request", "恰好一条"),
+    ({}, "user", "user", "missing_user", "已获授权"),
+    ({"model": "synthetic-private-sentinel"}, None, "model", "invalid_request", "fangtai"),
+    ({"user": 3}, None, "user", "invalid_request", "字符串"),
+    ({"stream": None}, None, "stream", "invalid_request", "不能为null"),
+    ({"stream": False, "stream_options": {}}, None, "stream_options", "invalid_request", "删除"),
+    ({"stream_options": {"include_usage": True}}, None,
+     "stream_options.include_usage", "invalid_request", "include_usage=false"),
+    ({"context": {"user_id": "3"}}, None, "context.user_id", "invalid_request", "JSON正整数"),
+    ({"session_id": "bad"}, None, "session_id", "invalid_request", "首轮可省略"),
+    ({"request_id": ""}, None, "request_id", "invalid_request", "1–128"),
+    ({"messages": [{"role": "assistant", "content": "synthetic-private-sentinel"}]}, None,
+     "messages.0.role", "invalid_request", "role 必须为 user"),
+    ({"messages": [{"role": "user"}]}, None,
+     "messages.0.content", "invalid_request", "纯文本"),
+    ({"tools": [{"synthetic": "synthetic-private-sentinel"}]}, None,
+     "tools", "invalid_request", "删除不支持"),
+    ({"temperature": 0.3}, None, "temperature", "invalid_request", "删除不支持"),
+])
+def test_invalid_submitted_fields_get_safe_correction_without_success(
+    tmp_path, catalog, changes, removed, parameter, code, hint,
+):
+    llm = ScriptedLLM()
+    payload = openai_payload(stream=True, **changes) if "stream" not in changes else openai_payload(
+        **changes,
+    )
+    if removed:
+        payload.pop(removed)
+    with client_for(tmp_path, catalog, llm) as client:
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/json")
+    error = response.json()["error"]
+    assert set(error) == {"message", "type", "param", "code"}
+    assert error["type"] == "invalid_request_error"
+    assert error["param"] == parameter and error["code"] == code
+    assert hint in error["message"] and "/api-guide" in error["message"]
+    assert "synthetic-private-sentinel" not in response.text
+    assert "[DONE]" not in response.text and "【菜谱JSON】" not in response.text
+    assert llm.parse_calls == 0
+
+
+def test_guide_does_not_touch_existing_session_or_invoke_business(tmp_path, catalog, monkeypatch):
+    llm = ScriptedLLM()
+    with client_for(tmp_path, catalog, llm) as client:
+        first = client.post("/v1/chat/completions", json=openai_payload())
+        assert first.status_code == 200
+        database = tmp_path / "state.db"
+        before = database.read_bytes()
+
+        def unexpected_work(*args, **kwargs):
+            raise AssertionError("Public guide must not access existing business/session state")
+
+        monkeypatch.setattr(client.app.state.agent, "chat", unexpected_work)
+        monkeypatch.setattr(client.app.state.agent.tools, "call", unexpected_work)
+        monkeypatch.setattr(SessionStore, "get", unexpected_work)
+        monkeypatch.setattr(llm, "parse", unexpected_work)
+        response = client.get("/api-guide", headers={"X-Session-ID": first.headers["x-session-id"]})
+        head = client.head("/api-guide")
+        assert response.status_code == head.status_code == 200
+        assert "x-session-id" not in response.headers
+        assert head.content == b"" and database.read_bytes() == before
+    assert llm.parse_calls == 1

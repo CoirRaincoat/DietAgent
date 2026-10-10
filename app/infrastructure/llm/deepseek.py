@@ -16,6 +16,14 @@ from app.domain.generated_recipe import (
     RecipeProposalResponse,
 )
 from app.domain.models import Intent, SessionState, UserProfile
+from app.infrastructure.diagnostics import (
+    mark_http_attempt,
+    model_call,
+    model_phase,
+    prepare_request,
+    record_envelope,
+    record_response,
+)
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 
 _PROMPT_PATH = Path(__file__).resolve().parents[3] / "configs" / "intent_prompt.txt"
@@ -49,6 +57,8 @@ def _schema_error(error: ValidationError, stage: str) -> LLMOutputError:
     else:
         category = "schema_validation"
     return LLMOutputError(stage=stage, field=field, category=category)
+
+
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -121,9 +131,9 @@ class DeepSeekLLM(BaseLLM):
     ) -> dict[str, Any]:
         if not self._api_key.strip():
             raise LLMUnavailable("authentication")
-        try:
-            response = await self._client.post(
-                self._url,
+        with model_phase("prepare"):
+            request = self._client.build_request(
+                "POST", self._url,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json={
                     "model": self._model,
@@ -142,11 +152,22 @@ class DeepSeekLLM(BaseLLM):
                 },
                 timeout=self._timeout,
             )
+            prepare_request(request)
+        try:
+            with model_phase("http"):
+                mark_http_attempt()
+                response = await self._client.send(request)
+                record_response(response)
         except httpx.TimeoutException:
             raise LLMUnavailable("timeout") from None
         except httpx.RequestError:
             raise LLMUnavailable("network") from None
 
+        with model_phase("decode"):
+            return self._decode_response(response)
+
+    @staticmethod
+    def _decode_response(response: httpx.Response) -> dict:
         if response.status_code in {401, 403}:
             raise LLMUnavailable("authentication")
         if response.status_code == 429:
@@ -158,6 +179,7 @@ class DeepSeekLLM(BaseLLM):
 
         try:
             envelope = response.json()
+            record_envelope(envelope)
             choices = envelope["choices"]
             if not isinstance(choices, list) or len(choices) != 1:
                 raise _OutputViolation("choices", "invalid_envelope")
@@ -195,10 +217,18 @@ class DeepSeekLLM(BaseLLM):
     async def parse(
         self, message: str, state: SessionState, profile: UserProfile
     ) -> Intent:
-        # Positive allowlist, not a redact-and-send copy of local state. Even
-        # normalized constraints, diner names and pending prompts can originate
-        # from a private profile or recipe. Only user-authored text may leave.
-        # The authoritative full state/profile still participates in LOCAL checks.
+        with model_call("parse"):
+            with model_phase("prepare"):
+                prompt, payload = self._intent_request(message, state, profile)
+            result = await self._json_completion(prompt, payload)
+            with model_phase("validate"):
+                return self._parse_intent(result, message, state)
+
+    def _intent_request(
+        self, message: str, state: SessionState, profile: UserProfile,
+    ) -> tuple[str, dict]:
+        # Positive allowlist: private profile, constraints, recipe facts and
+        # assistant history stay local, even with diagnostics enabled.
         payload = {
             "message": message,
             "confirmed_fields": state.confirmed_fields,
@@ -242,7 +272,9 @@ class DeepSeekLLM(BaseLLM):
             + "\nIntent json schema:\n"
             + json.dumps(Intent.model_json_schema(), ensure_ascii=False)
         )
-        result = await self._json_completion(prompt, payload)
+        return prompt, payload
+
+    def _parse_intent(self, result: dict, message: str, state: SessionState) -> Intent:
         try:
             if "action" not in result:
                 raise _OutputViolation("action", "missing_field")

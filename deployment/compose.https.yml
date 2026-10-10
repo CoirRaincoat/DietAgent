@@ -1,0 +1,19 @@
+# Add only on the new cloud server after configuring a real domain.
+services:
+  https:
+    image: ${CADDY_IMAGE:-caddy:2-alpine}
+    environment:
+      CLOUD_DOMAIN: ${CLOUD_DOMAIN:?Set your real DNS domain before HTTPS startup}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [gateway]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  caddy_data:
+  caddy_config:

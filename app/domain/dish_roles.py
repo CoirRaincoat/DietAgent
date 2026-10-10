@@ -20,7 +20,7 @@ from app.domain.protein_food_names import (
 from app.domain.source_soups import finished_soup_evidence, solid_soup_title_evidence
 from app.domain.title_counts import culinary_title_without_zero_soup_metadata
 
-ROLE_VERSION = "primary-culinary-role-v18-solid-soup-title"
+ROLE_VERSION = "primary-culinary-role-v19-integrated-name-boundaries"
 _PROTEIN = (
     "肉",
     "排骨",
@@ -81,6 +81,8 @@ _FALSE_PROTEIN = (
     "牛肉粉",
     "牛肉汁",
     "牛肉汤",
+    "牛肉高汤",
+    "肉汤",
     "牛骨汤",
     "猪骨汤",
     "骨汤",
@@ -112,6 +114,10 @@ _FALSE_PROTEIN = (
     "马蹄",
 )
 _VEGETABLE = (
+    "杏鲍菇",
+    "鸡枞",
+    "猪肚菇",
+    "鸡毛菜",
     "白菜",
     "生菜",
     "青菜",
@@ -311,7 +317,7 @@ def _protein_tokens(food: str) -> set[str]:
     """Remove finite seasoning/plant false friends before looking for protein."""
     food = without_plant_animal_homonyms(food)
     for term in _FALSE_PROTEIN:
-        food = food.replace(term, "")
+        food = food.replace(term, " ")
     return {term for term in _PROTEIN if term in food}
 
 

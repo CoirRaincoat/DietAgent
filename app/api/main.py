@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.agent.service import MealAgent, UnknownSession, UnknownUser
+from app.api.api_guide import GUIDE_PATH, public_api_guide, validation_guidance
 from app.api.openai_compat import (
     ChatCompletionsRequest,
     OpenAIRequestError,
@@ -23,6 +24,7 @@ from app.api.openai_compat import (
 )
 from app.domain.models import ChatResult
 from app.infrastructure.data import DataCatalog
+from app.infrastructure.diagnostics import request_diagnostics, timed
 from app.infrastructure.llm.base import BaseLLM, LLMOutputError, LLMUnavailable
 from app.infrastructure.llm.deepseek import DeepSeekLLM
 from app.infrastructure.runtime_catalog import load_runtime_catalog
@@ -109,19 +111,21 @@ def create_app(
         request_id: str | None,
     ) -> ChatResult:
         semaphore = application.state.capacity
-        try:
-            await asyncio.wait_for(semaphore.acquire(), timeout=0.25)
-        except TimeoutError:
-            raise CapacityExceeded from None
-        try:
-            return await application.state.agent.chat(
-                user_id=user_id,
-                message=message,
-                session_id=session_id,
-                request_id=request_id,
-            )
-        finally:
-            semaphore.release()
+        with request_diagnostics(config.latency_diagnostics_enabled, request_id):
+            try:
+                with timed("capacity_wait"):
+                    await asyncio.wait_for(semaphore.acquire(), timeout=0.25)
+            except TimeoutError:
+                raise CapacityExceeded from None
+            try:
+                return await application.state.agent.chat(
+                    user_id=user_id,
+                    message=message,
+                    session_id=session_id,
+                    request_id=request_id,
+                )
+            finally:
+                semaphore.release()
 
     @application.exception_handler(OpenAIRequestError)
     async def openai_error_handler(_: Request, error: OpenAIRequestError) -> JSONResponse:
@@ -145,15 +149,25 @@ def create_app(
             return await request_validation_exception_handler(request, error)
         details = error.errors()
         parameter = None
+        error_type = ""
         if details:
             parameter = ".".join(str(part) for part in details[0].get("loc", [])[1:]) or None
+            error_type = details[0].get("type", "")
+        parameter, message = validation_guidance(parameter, error_type)
         public_error = OpenAIRequestError(
             422,
-            "请求字段不符合当前 Chat Completions 文本接口约定。",
+            message,
             "invalid_request",
             parameter,
         )
         return JSONResponse(status_code=422, content=error_body(public_error))
+
+    @application.api_route(GUIDE_PATH, methods=["GET", "HEAD"])
+    async def api_guide(request: Request) -> Response:
+        response = JSONResponse(public_api_guide())
+        if request.method == "HEAD":
+            return Response(status_code=200, headers=dict(response.headers))
+        return response
 
     @application.get("/health")
     async def health() -> dict:

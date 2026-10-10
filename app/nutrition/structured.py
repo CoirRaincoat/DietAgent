@@ -4,7 +4,7 @@ from functools import lru_cache
 
 from app.domain.models import Constraints, Ingredient, Recipe
 from app.domain.recipe_origin import display_source_row, is_generated_recipe
-from app.infrastructure.data import _has_protein_source
+from app.infrastructure.data import _VEGETABLE_HOMONYMS, _has_protein_source
 from app.nutrition.models import (
     GoalMatch,
     IngredientContribution,
@@ -32,11 +32,11 @@ _FIBER_FOODS = (
     "竹笋", "冬笋", "春笋", "蘑菇", "香菇", "木耳", "银耳", "秋葵", "莴笋",
     "菜心", "韭菜", "莲藕", "藕", "豆芽", "金针菇", "口蘑", "塔菜", "娃娃菜",
     "山药", "淮山", "海带", "紫菜", "豇豆", "刀豆", "毛豆", "青椒", "甜椒",
-    "杏鲍菇", "鸡腿菇", "蟹味菇", "土豆", "马铃薯", "红薯", "紫薯", "芋头",
+    "土豆", "马铃薯", "红薯", "紫薯", "芋头",
     "芋艿", "玉米", "糙米", "燕麦", "藜麦", "全麦", "红豆", "绿豆", "黑豆",
     "黄豆", "大豆", "豌豆", "鹰嘴豆", "花生", "核桃", "杏仁", "腰果", "芝麻",
     "苹果", "梨", "香蕉", "芒果", "草莓", "蓝莓", "葡萄", "桃", "橙", "柚",
-    "猕猴桃", "奇异果", "牛油果", "红枣", "莲子",
+    "猕猴桃", "奇异果", "牛油果", "红枣", "莲子", *_VEGETABLE_HOMONYMS,
 )
 _FAT_OILS = (
     "食用油", "植物油", "橄榄油", "菜籽油", "玉米油", "花生油", "芝麻油", "香油",
@@ -45,7 +45,7 @@ _FAT_OILS = (
 _FAT_FOODS = (*_FAT_OILS, "核桃", "花生", "杏仁", "腰果", "松子", "榛子", "芝麻", "牛油果")
 _PLANT_PROTEINS = ("黄豆", "大豆", "毛豆", "黑豆", "红豆", "绿豆", "豌豆", "鹰嘴豆")
 _MILK_PROTEINS = ("牛奶", "鲜奶", "纯牛奶", "酸奶", "奶粉", "豆浆", "奶酪", "乳酪", "芝士")
-_CONDIMENT_MARKERS = ("酱", "汁", "汤", "精", "调味", "料包", "豆蔻", "肉桂", "肉蔻", "鸡血藤", "鸡冠花")
+_CONDIMENT_MARKERS = ("酱", "汁", "汤", "精", "调味", "料包", "鸡血藤", "鸡冠花")
 _SUGAR_SOURCES = ("白糖", "白砂糖", "砂糖", "冰糖", "红糖", "蜂蜜", "糖浆", "炼乳", "炼奶")
 _SODIUM_SOURCES = ("盐", "酱油", "生抽", "老抽", "蚝油", "豆瓣酱", "豆豉", "腐乳", "咸菜", "腌菜")
 _ROLE_LABELS = {
@@ -79,7 +79,9 @@ def _roles(ingredient: Ingredient) -> list[str]:
     condiment = _has(name, _CONDIMENT_MARKERS)
     oil = name == "油" or _has(name, _FAT_OILS)
     roles = []
-    if not condiment and not oil and not _has(name, ("蛋糕", "蛋挞", "牛油果", "鸡头米")):
+    # The shared predicate ignores plant/spice homonyms without discarding the
+    # genuine protein text in a mixed ingredient (e.g. 肉桂鸡翅).
+    if not condiment and not oil and not _has(name, ("蛋糕", "蛋挞")):
         if _has_protein_source([ingredient]) or _has(name, _PLANT_PROTEINS + _MILK_PROTEINS):
             roles.append("protein")
     if not condiment and not oil and _has(name, _CARBOHYDRATE_FOODS):

@@ -103,7 +103,8 @@ def source_recipes() -> dict[int, Recipe]:
         (26, "梅干菜扣肉", "hot"),
         (187, "葱香土豆泥", "hot"),
         (83, "烤火鸡腿", "hot"),
-        (50, "蒸木耳素饺子", "hot"),
+        # Final unspecified machine execution overrides earlier filling heat.
+        (50, "蒸木耳素饺子", "unknown"),
         (371, "凉拌海带丝", "cold"),
         (854, "凉拌秋葵", "cold"),
         (1558, "糟卤冰镇小龙虾", "cold"),
@@ -127,7 +128,7 @@ def test_preparation_cooling_does_not_claim_cold_food_balance(
 
     result = analyze_menu_balance(menu)
 
-    assert result.temperature_counts == {"hot": 4, "cold": 0, "unknown": 0}
+    assert result.temperature_counts == {"hot": 3, "cold": 0, "unknown": 1}
     assert any("未识别到有明确冷食证据" in gap for gap in result.gaps)
     summary = balance_summary(result)
     assert "冷食 0 道" not in summary

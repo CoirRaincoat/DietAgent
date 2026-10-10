@@ -104,6 +104,7 @@ def start_demo(
         "DEEPSEEK_BASE_URL": settings.deepseek_base_url,
         "DEEPSEEK_MODEL": settings.deepseek_model,
         "LLM_TIMEOUT_SECONDS": str(settings.llm_timeout_seconds),
+        "LATENCY_DIAGNOSTICS_ENABLED": "true" if settings.latency_diagnostics_enabled else "false",
         "SESSION_DB": "/app/runtime/sessions.sqlite3",
         "DEMO_PORT": str(port),
         "COMPOSE_DISABLE_ENV_FILE": "1",

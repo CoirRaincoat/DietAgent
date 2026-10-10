@@ -122,11 +122,19 @@ def apply_menu_restore(
         or scoped_food_menu_issue(chosen, state.constraints, rules)
     ):
         return "历史菜单不满足当前荤素结构或明确做法要求，无法直接恢复；请核对要求后重试。"
-    # Undo exactly the rejection delta that rejected this menu revision.
+    # A later rejection can target an exact restored copy of the original.
+    # Include those revisions without clearing rejections of other menus,
+    # even when those menus share some of the original dishes.
+    target_revision_ids = {revision.revision_id}
+    target_revision_ids.update(
+        item.revision_id
+        for item in state.menu_history
+        if item.source == "restored_menu" and item.recipe_ids == revision.recipe_ids
+    )
     undo_ids: set[str] = set()
     undo_actions = []
     for action in state.rejection_actions:
-        if action.source_menu_revision_id == revision.revision_id and action.active:
+        if action.source_menu_revision_id in target_revision_ids and action.active:
             undo_ids.update(action.rejected_recipe_ids)
             undo_actions.append(action)
     remaining = [rid for rid in state.rejected_recipe_ids if rid not in undo_ids]

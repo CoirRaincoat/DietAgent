@@ -1,5 +1,6 @@
 """Real local API workflows with a scripted adapter, not real-model quality."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -99,7 +100,15 @@ def exercise_initial_wire(tmp_path: Path, count: int, stream: bool) -> list[dict
         assert soups(result, data) == count
         assert "南瓜海鲜盅" in content
         assert all(r["name"] in content for r in result["menu"])
-    assert content.endswith(result["reason"])
+    body, marker, payload = content.rpartition("\n\n【菜谱JSON】\n```json\n")
+    assert marker and content.count(marker) == 1 and payload.endswith("\n```")
+    assert json.loads(payload[:-4]) == [
+        {"recipe_id": item["recipe_id"], "name": item["name"]} for item in result["menu"]
+    ]
+    if result["status"] == "ok":
+        assert body.endswith(result["reason"])
+    else:
+        assert body == result["reason"] + "\n本次未返回菜单。"
     return trace
 
 

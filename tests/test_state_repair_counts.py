@@ -292,7 +292,10 @@ def test_openai_json_and_sse_recover_count_conflict_through_real_adapter(tmp_pat
         first_text = completion_text(first, stream)
         sid = first.headers["x-session-id"]
         first_state = store.get(sid, 900003)
-        assert first_text == first_state.pending_clarification
+        first_body, marker, payload = first_text.rpartition("\n\n【菜谱JSON】\n```json\n")
+        assert marker and first_text.count(marker) == 1 and payload.endswith("\n```")
+        assert json.loads(payload[:-4]) == []
+        assert first_body == first_state.pending_clarification + "\n本次未返回菜单。"
         assert "2" in first_text and "3" in first_text
         assert "本餐菜单：" not in first_text and not first_state.menu_valid
         assert first_state.pending_menu_counts.model_dump() == {"dish_count": 2, "soup_count": 3}
@@ -309,6 +312,11 @@ def test_openai_json_and_sse_recover_count_conflict_through_real_adapter(tmp_pat
     assert final.constraints.allergies == ["花生"]
     assert "本餐菜单：" in text
     assert all(catalog.recipes[key].name in text for key in final.menu_ids)
+    _, marker, payload = text.rpartition("\n\n【菜谱JSON】\n```json\n")
+    assert marker and text.count(marker) == 1 and payload.endswith("\n```")
+    assert json.loads(payload[:-4]) == [
+        {"recipe_id": key, "name": catalog.recipes[key].name} for key in final.menu_ids
+    ]
     assert len(observed) == 2  # Two parses; verified explanation is local, no retry.
     assert observed[1]["pending_menu_counts"] == {"dish_count": 2, "soup_count": 3}
 

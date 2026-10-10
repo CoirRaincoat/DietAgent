@@ -125,6 +125,9 @@ def parse_labels(raw: str) -> tuple[list[str], list[str]]:
     return labels, flags
 
 
+_VEGETABLE_HOMONYMS = ("杏鲍菇", "鸡腿菇", "蟹味菇", "鸡枞", "猪肚菇", "鸡毛菜")
+
+
 def _has_protein_source(ingredients: list[Ingredient]) -> bool:
     """Keep ingredient-level nutrition evidence independent of culinary roles."""
     return any(has_protein_ingredient(item.name) for item in ingredients)

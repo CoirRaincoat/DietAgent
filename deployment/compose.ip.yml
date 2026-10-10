@@ -1,0 +1,6 @@
+# Add to compose.cloud.yml only for a public IPv4 HTTP deployment.
+# Requires Compose >= 2.24.4. Keep the backend private and the token required.
+services:
+  gateway:
+    ports: !override
+      - "0.0.0.0:80:8080"

@@ -1,0 +1,6 @@
+{$CLOUD_DOMAIN} {
+    reverse_proxy gateway:8080 {
+        # Forward validated answer chunks without aggregation.
+        flush_interval -1
+    }
+}
